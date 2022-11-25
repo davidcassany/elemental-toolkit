@@ -3,7 +3,7 @@
   <head>
     <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
-<meta name="generator" content="Hugo 0.101.0" /><META NAME="ROBOTS" CONTENT="INDEX, FOLLOW">
+<meta name="generator" content="Hugo 0.106.0"><META NAME="ROBOTS" CONTENT="INDEX, FOLLOW">
 
 
 <link rel="shortcut icon" href="https://rancher.github.io/elemental-toolkit/favicons/favicon.ico" >
@@ -24,12 +24,12 @@
 <meta property="og:type" content="article" />
 <meta property="og:url" content="https://rancher.github.io/elemental-toolkit/docs/reference/selinux/" /><meta property="article:section" content="docs" />
 <meta property="article:published_time" content="2021-01-05T00:00:00+00:00" />
-<meta property="article:modified_time" content="2022-11-16T11:29:48+01:00" /><meta property="og:site_name" content="Elemental toolkit" />
+<meta property="article:modified_time" content="2022-11-25T09:22:09+01:00" /><meta property="og:site_name" content="Elemental toolkit" />
 
 <meta itemprop="name" content="SELinux">
 <meta itemprop="description" content="Build SELinux policies with Elemental
 "><meta itemprop="datePublished" content="2021-01-05T00:00:00+00:00" />
-<meta itemprop="dateModified" content="2022-11-16T11:29:48+01:00" />
+<meta itemprop="dateModified" content="2022-11-25T09:22:09+01:00" />
 <meta itemprop="wordCount" content="380">
 <meta itemprop="keywords" content="" /><meta name="twitter:card" content="summary"/>
 <meta name="twitter:title" content="SELinux"/>
@@ -132,7 +132,7 @@ if (!doNotTrack) {
   aria-label="Search this site…"
   autocomplete="off"
   
-  data-offline-search-index-json-src="https://rancher.github.io/elemental-toolkit/offline-search-index.f411dbb9752742334219a36daa4e0b2f.json"
+  data-offline-search-index-json-src="https://rancher.github.io/elemental-toolkit/offline-search-index.2f5a536e36502168cc81e85092639d64.json"
   data-offline-search-base-href="https://rancher.github.io/elemental-toolkit/"
   data-offline-search-max-results="10"
 >
@@ -168,7 +168,7 @@ if (!doNotTrack) {
   aria-label="Search this site…"
   autocomplete="off"
   
-  data-offline-search-index-json-src="https://rancher.github.io/elemental-toolkit/offline-search-index.f411dbb9752742334219a36daa4e0b2f.json"
+  data-offline-search-index-json-src="https://rancher.github.io/elemental-toolkit/offline-search-index.2f5a536e36502168cc81e85092639d64.json"
   data-offline-search-base-href="https://rancher.github.io/elemental-toolkit/"
   data-offline-search-max-results="10"
 >
@@ -2173,7 +2173,7 @@ example and mostly follows <code>audit2allow</code> <a href="https://linux.die.n
 <div class="highlight"><pre tabindex="0" style="background-color:#f8f8f8;-moz-tab-size:4;-o-tab-size:4;tab-size:4;"><code class="language-yaml" data-lang="yaml"><span style="display:flex;"><span><span style="color:#204a87;font-weight:bold">name</span><span style="color:#000;font-weight:bold">:</span><span style="color:#f8f8f8;text-decoration:underline"> </span><span style="color:#4e9a06">&#34;policy&#34;</span><span style="color:#f8f8f8;text-decoration:underline">
 </span></span></span><span style="display:flex;"><span><span style="color:#f8f8f8;text-decoration:underline"></span><span style="color:#204a87;font-weight:bold">category</span><span style="color:#000;font-weight:bold">:</span><span style="color:#f8f8f8;text-decoration:underline"> </span><span style="color:#4e9a06">&#34;selinux&#34;</span><span style="color:#f8f8f8;text-decoration:underline">
 </span></span></span><span style="display:flex;"><span><span style="color:#f8f8f8;text-decoration:underline"></span><span style="color:#204a87;font-weight:bold">version</span><span style="color:#000;font-weight:bold">:</span><span style="color:#f8f8f8;text-decoration:underline"> </span><span style="color:#0000cf;font-weight:bold">0.0.1</span><span style="color:#f8f8f8;text-decoration:underline">
-</span></span></span></code></pre></div><p>Example mypolicy.te (generated with <code>audit2alllow</code>)</p>
+</span></span></span></code></pre></div><p>Example mypolicy.te (generated with <code>audit2allow</code>)</p>
 <pre tabindex="0"><code>#==== Elemental SELinux targeted policy module ========
 #
 # Disclaimer: This module is definition is for illustration use only. It
@@ -2192,7 +2192,7 @@ require {
 	type initrc_t;
 	type bin_t;
 	type tmpfs_t;
-	type wicked_t;
+	type NetworkManager_t;
 	type systemd_logind_t;
 	type sshd_t;
 	type lib_t;
@@ -2250,10 +2250,10 @@ allow unconfined_service_t bin_t:file execmod;
 #!!!! This avc can be allowed using the boolean &#39;selinuxuser_execmod&#39;
 allow unconfined_t bin_t:file execmod;
 
-#============= wicked_t ==============
-allow wicked_t tmpfs_t:dir read;
-allow wicked_t tmpfs_t:file { getattr open read };
-allow wicked_t tmpfs_t:lnk_file read;
+#============= NetworkManager_t ==============
+allow NetworkManager_t tmpfs_t:dir read;
+allow NetworkManager_t tmpfs_t:file { getattr open read };
+allow NetworkManager_t tmpfs_t:lnk_file read;
 </code></pre>
 	
 		<style>
@@ -2322,8 +2322,8 @@ allow wicked_t tmpfs_t:lnk_file read;
 	<div class="text-muted mt-5 pt-3 border-top">
 
     Last modified
-    November 16, 2022
-    : <a  href="https://github.com/rancher/elemental-toolkit/commit/84f3f1c1983e22e25692fa54e11754ce909b78ee">Also trigger Dev rebuild on tag push (#1646) (84f3f1c)</a>
+    November 25, 2022
+    : <a  href="https://github.com/rancher/elemental-toolkit/commit/40b2f5d1861dc5b2f5241842bada3575c3f33ea1">Bump utils/nerdctl to 0.23.0 (#1603) (40b2f5d)</a>
 
 </div>
 
