@@ -260,12 +260,18 @@ readLayoutConfig
 
 [ -z "${cos_overlay}" ] && exit 0
 
+# Hack to get the root device and its mounted subvolume
+snapshot=${root##*[}
+snapshot=${snapshot%%]}
+root=${root%%[*}
+
 # If sysroot is already an overlay do not prepare the rw overlay
 if [ "${root_fstype}" != "overlay" ]; then
     if [ -f "${base_part}" ]; then
         fstab="${base_part} /run/initramfs/cos-state auto ${cos_root_perm} 0 0\n"
     fi
-    fstab+="${root} / auto ${cos_root_perm} 0 0\n"
+
+    fstab+="${root} / auto ${cos_root_perm},subvol=${snapshot} 0 0\n"
     fstab+=$(mountOverlayBase)
 fi
 

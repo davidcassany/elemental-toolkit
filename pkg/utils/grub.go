@@ -39,9 +39,13 @@ const (
 	grubCfgFile     = "grub.cfg"
 
 	grubEFICfgTmpl = `
+insmod btrfs
+
+set btrfs_relative_path="y"
+
 search --no-floppy --label --set=root %s
 set prefix=($root)/` + grubConfDir + `
-configfile ($root)/` + grubConfDir + `/%s
+configfile ${prefix}/` + grubCfgFile + `
 `
 )
 
@@ -254,7 +258,7 @@ func (g Grub) InstallEFI(rootDir, bootDir, efiDir, deviceLabel string) (string, 
 	// Add grub.cfg in EFI that chainloads the grub.cfg in recovery
 	// Notice that we set the config to /grub2/grub.cfg which means the above we need to copy the file from
 	// the installation source into that dir
-	grubCfgContent := []byte(fmt.Sprintf(grubEFICfgTmpl, deviceLabel, grubCfgFile))
+	grubCfgContent := []byte(fmt.Sprintf(grubEFICfgTmpl, deviceLabel))
 	// Fallback
 	err = g.config.Fs.WriteFile(filepath.Join(efiDir, fallbackEFIPath, grubCfgFile), grubCfgContent, cnst.FilePerm)
 	if err != nil {

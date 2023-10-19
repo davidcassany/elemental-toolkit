@@ -42,6 +42,9 @@ RUN ARCH=$(uname -m); \
       less \
       sudo \
       curl \
+      btrfsprogs \
+      snapper \
+      tukit \
       sed
 
 # Just add the elemental cli

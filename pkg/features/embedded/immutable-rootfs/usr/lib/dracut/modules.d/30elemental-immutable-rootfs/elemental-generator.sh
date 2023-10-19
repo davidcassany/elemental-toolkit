@@ -148,8 +148,8 @@ mkdir -p "$GENERATOR_DIR/$dev.device.d"
     echo "RequiresMountsFor=${root_part_mnt}"
     echo "[Mount]"
     echo "Where=/sysroot"
-    echo "What=${root_part_mnt}/${cos_img#/}"
-    echo "Options=${cos_root_perm},suid,dev,exec,auto,nouser,async"
+    echo "What=${root}"
+    echo "Options=${cos_root_perm},subvol=${cos_img},suid,dev,exec,auto,nouser,async"
 } > "$GENERATOR_DIR"/sysroot.mount
 
 if [ ! -e "$GENERATOR_DIR/initrd-root-fs.target.requires/sysroot.mount" ]; then
