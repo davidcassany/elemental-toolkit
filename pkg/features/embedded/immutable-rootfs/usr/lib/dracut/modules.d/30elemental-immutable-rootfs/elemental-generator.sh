@@ -15,6 +15,8 @@ fi
 cos_img=$(getarg cos-img/filename=)
 [ -z "${cos_img}" ] && exit 0
 
+cos_mode=$(getarg cos-mode=)
+
 [ -z "${root}" ] && root=$(getarg root=)
 
 cos_root_perm="ro"
@@ -148,8 +150,13 @@ mkdir -p "$GENERATOR_DIR/$dev.device.d"
     echo "RequiresMountsFor=${root_part_mnt}"
     echo "[Mount]"
     echo "Where=/sysroot"
-    echo "What=${root}"
-    echo "Options=${cos_root_perm},subvol=${cos_img},suid,dev,exec,auto,nouser,async"
+    if [ "${cos_mode}" == "recovery" ]; then
+        echo "What=${root_part_mnt}/${cos_img#/}"
+        echo "Options=${cos_root_perm},suid,dev,exec,auto,nouser,async"
+    else
+        echo "What=${root}"
+        echo "Options=${cos_root_perm},subvol=${cos_img},suid,dev,exec,auto,nouser,async"
+    fi
 } > "$GENERATOR_DIR"/sysroot.mount
 
 if [ ! -e "$GENERATOR_DIR/initrd-root-fs.target.requires/sysroot.mount" ]; then
