@@ -17,8 +17,8 @@ if getargbool 0 rd.cos.disable; then
     return 0
 fi
 
-cos_img=$(getarg cos-img/filename=)
-[ -z "${cos_img}" ] && return 0
+cos_mode=$(getarg cos-mode=)
+[ -z "${cos_mode}" ] && return 0
 [ -z "${root}" ] && root=$(getarg root=)
 
 cos_root_perm="ro"
@@ -53,7 +53,7 @@ fi
 
 # set sentinel file for boot mode
 mkdir -p /run/cos
-case "${cos_img}" in
+case "${cos_mode}" in
     *recovery*)
         echo -n 1 > /run/cos/recovery_mode ;;
     *active*)
