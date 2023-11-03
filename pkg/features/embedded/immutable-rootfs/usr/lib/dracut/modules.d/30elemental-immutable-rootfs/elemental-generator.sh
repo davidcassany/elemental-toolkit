@@ -5,6 +5,8 @@ type getarg >/dev/null 2>&1 || . /lib/dracut-lib.sh
 cos_unit="elemental-immutable-rootfs.service"
 cos_layout="/run/cos/cos-layout.env"
 root_part_mnt="/run/initramfs/cos-state" # TODO change to something under /run/cos
+snapshots_mnt="/.snapshots"
+snapshots_vol="@/.snapshots"
 
 # Omit any immutable roofs module logic if disabled
 if getargbool 0 rd.cos.disable; then
@@ -163,4 +165,25 @@ if [ ! -e "$GENERATOR_DIR/initrd-root-fs.target.requires/sysroot.mount" ]; then
     mkdir -p "$GENERATOR_DIR"/initrd-root-fs.target.requires
     ln -s "$GENERATOR_DIR"/sysroot.mount \
         "$GENERATOR_DIR"/initrd-root-fs.target.requires/sysroot.mount
+fi
+
+if [ "${cos_mode}" != "recovery" ]; then
+    snapshots_unit="${snapshots_mnt#/}"
+    snapshots_unit="${snapshots_unit//-/\\x2d}"
+    snapshots_unit="${snapshots_unit//\//-}.mount"
+    {
+        echo "[Unit]"
+        echo "Before=initrd-root-fs.target"
+        echo "DefaultDependencies=no"
+        echo "[Mount]"
+        echo "Where=${snapshots_mnt}"
+        echo "What=${root}"
+	echo "Options=defaults,subvol=${snapshots_vol}"
+    } > "$GENERATOR_DIR/${snapshots_unit}"
+
+    if [ ! -e "$GENERATOR_DIR/initrd-root-fs.target.requires/${snapshots_unit}" ]; then
+        mkdir -p "$GENERATOR_DIR"/initrd-root-fs.target.requires
+        ln -s "$GENERATOR_DIR/${snapshots_unit}" \
+            "$GENERATOR_DIR/initrd-root-fs.target.requires/${snapshots_unit}"
+    fi
 fi

@@ -43,6 +43,7 @@ RUN ARCH=$(uname -m); \
       sudo \
       curl \
       btrfsprogs \
+      btrfsmaintenance \
       snapper \
       tukit \
       sed
@@ -55,6 +56,15 @@ RUN systemctl enable NetworkManager.service
 
 # Enable /tmp to be on tmpfs
 RUN cp /usr/share/systemd/tmp.mount /etc/systemd/system
+
+# Configure snapper with defaults
+RUN cp /etc/snapper/config-templates/default /etc/snapper/configs/root && \
+    sed -i 's|SNAPPER_CONFIGS=.*$|SNAPPER_CONFIGS="root"|g' /etc/sysconfig/snapper && \
+    sed -i 's|^TIMELINE_CREATE=.*$|TIMELINE_CREATE="no"|g' /etc/snapper/configs/root && \
+    sed -i 's|^QGROUP=.*$|QGROUP="1/0"|g' /etc/snapper/configs/root && \
+    sed -i 's|^NUMBER_LIMIT=.*$|NUMBER_LIMIT="2-10"|g' /etc/snapper/configs/root && \
+    sed -i 's|^NUMBER_LIMIT_IMPORTANT=.*$|NUMBER_LIMIT_IMPORTANT="4-10"|g' /etc/snapper/configs/root
+
 
 # Generate initrd with required elemental services
 RUN elemental init -f && \

@@ -249,6 +249,8 @@ declare cos_layout="/run/cos/cos-layout.env"
 declare root_fstype=$(findmnt -rno FSTYPE /sysroot)
 declare root=$(findmnt -rno SOURCE /sysroot)
 declare base_part=$(findmnt -rno SOURCE /run/cos/root)
+declare snapshots_mnt="/.snapshots"
+declare snapshots_vol="@/.snapshots"
 declare partname
 declare fstab
 declare state_paths
@@ -271,7 +273,13 @@ if [ "${root_fstype}" != "overlay" ]; then
         fstab="${base_part} /run/initramfs/cos-state auto ${cos_root_perm} 0 0\n"
     fi
 
-    fstab+="${root} / auto ${cos_root_perm},subvol=${snapshot} 0 0\n"
+    if [ "${root_fstype}" == "btrfs" ]; then
+        fstab+="${root} / auto ${cos_root_perm},subvol=${snapshot} 0 0\n"
+        fstab+="${root} ${snapshots_mnt} auto defaults,subvol=${snapshots_vol} 0 0\n"
+    else
+        fstab+="${root} / auto ${cos_root_perm} 0 0\n"
+    fi
+
     fstab+=$(mountOverlayBase)
 fi
 
