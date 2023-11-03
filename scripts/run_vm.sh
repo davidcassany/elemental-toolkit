@@ -10,11 +10,11 @@ TESTS_PATH=$(realpath -s "${SCRIPTS_PATH}/../tests")
 : "${ELMNTL_FIRMWARE:=/usr/share/qemu/ovmf-x86_64.bin}"
 : "${ELMNTL_FWDIP:=127.0.0.1}"
 : "${ELMNTL_FWDPORT:=2222}"
-: "${ELMNTL_MEMORY:=4096}"
-: "${ELMNTL_LOGFILE:=${TESTS_PATH}/${ELMNTL_PREFIX}serial.log}"
-: "${ELMNTL_PIDFILE:=${TESTS_PATH}/${ELMNTL_PREFIX}testvm.pid}"
-: "${ELMNTL_TESTDISK:=${TESTS_PATH}/${ELMNTL_PREFIX}testdisk.qcow2}"
-: "${ELMNTL_VMSTDOUT:=${TESTS_PATH}/${ELMNTL_PREFIX}vmstdout}"
+: "${ELMNTL_MEMORY:=2048}"
+: "${ELMNTL_LOGFILE:=${TESTS_PATH}/${ELMNTL_PREFIX:+${ELMNTL_PREFIX}.}serial.log}"
+: "${ELMNTL_PIDFILE:=${TESTS_PATH}/${ELMNTL_PREFIX:+${ELMNTL_PREFIX}.}testvm.pid}"
+: "${ELMNTL_TESTDISK:=${TESTS_PATH}/${ELMNTL_PREFIX:+${ELMNTL_PREFIX}.}testdisk.qcow2}"
+: "${ELMNTL_VMSTDOUT:=${TESTS_PATH}/${ELMNTL_PREFIX:+${ELMNTL_PREFIX}.}vmstdout}"
 : "${ELMNTL_DISKSIZE:=16G}"
 : "${ELMNTL_DISPLAY:=none}"
 : "${ELMNTL_ACCEL:=kvm}"
@@ -95,6 +95,7 @@ function stop {
 }
 
 function clean {
+  echo "Clean for ${ELMNTL_PREFIX} prefix"
   ([ -f "${ELMNTL_LOGFILE}" ] && rm -f "${ELMNTL_LOGFILE}") || true
   ([ -f "${ELMNTL_TESTDISK}" ] && rm -f "${ELMNTL_TESTDISK}") || true
   ([ -f "${ELMNTL_VMSTDOUT}" ] && rm -f "${ELMNTL_VMSTDOUT}") || true

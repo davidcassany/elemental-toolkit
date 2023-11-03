@@ -1,3 +1,5 @@
+EXPAND_PREFIX?=expand
+EXPANDED_DISK?=$(ROOT_DIR)/tests/$(EXPAND_PREFIX).testdisk.qcow2
 GINKGO?="github.com/onsi/ginkgo/v2/ginkgo"
 
 GINKGO_ARGS?=-v --fail-fast -r --timeout=3h
@@ -24,42 +26,60 @@ endif
 	@scripts/run_vm.sh start $(ISO)
 	@echo "VM started from $(ISO)"
 
-.PHONY: test-clean
-test-clean: test-stop
-	@scripts/run_vm.sh clean
+.PHONY: test-clean-%
+test-clean-%: test-stop-%
+	@ELMNTL_PREFIX=$* scripts/run_vm.sh clean
 
-.PHONY: test-stop
-test-stop:
-	@scripts/run_vm.sh stop
+.PHONY: test-stop-%
+test-stop-%:
+	@ELMNTL_PREFIX=$* scripts/run_vm.sh stop
+
+.PHONY: test-stop-all
+test-stop-all: test-stop-upgrade test-stop-fallback test-stop-recovery test-stop-fsck test-stop-grubfallback test-stop-smoke test-stop-expand
+
+.PHONY: test-clean-all
+test-clean-all: test-clean-upgrade test-clean-fallback test-clean-recovery test-clean-fsck test-clean-grubfallback test-clean-smoke test-clean-expand
 
 .PHONY: test-installer
 test-installer: prepare-installer-test
 	VM_PID=$$(scripts/run_vm.sh vmpid) go run $(GINKGO) $(GINKGO_ARGS) ./tests/installer
 	VM_PID=$$(scripts/run_vm.sh vmpid) go run $(GINKGO) $(GINKGO_ARGS) ./tests/smoke
 
-.PHONY: test-smoke
-test-smoke: test-active
-	VM_PID=$$(scripts/run_vm.sh vmpid) go run $(GINKGO) $(GINKGO_ARGS) ./tests/smoke
+.PHONY: test-disk-all
+test-disk-all: test-upgrade test-fallbak test-fsck test-recovery test-grubfallback test-smoke
 
-.PHONY: test-grubfallback
-test-grubfallback: test-active
-	VM_PID=$$(scripts/run_vm.sh vmpid) go run $(GINKGO) $(GINKGO_ARGS) ./tests/grubfallback
+.PHONY: test-%
+test-%: prepare-test-%
+	echo $@
+	VM_PID=$$(ELMNTL_PREFIX=$* scripts/run_vm.sh vmpid) go run $(GINKGO) $(GINKGO_ARGS) ./tests/$*
 
-.PHONY: test-recovery
-test-recovery: test-active
-	VM_PID=$$(scripts/run_vm.sh vmpid) go run $(GINKGO) $(GINKGO_ARGS) ./tests/recovery
+.PHONY: test-A
+test-A: test-upgrade test-fallback test-smoke
 
-.PHONY: test-fallback
-test-fallback: test-active
-	VM_PID=$$(scripts/run_vm.sh vmpid) go run $(GINKGO) $(GINKGO_ARGS) ./tests/fallback
+.PHONY: test-B
+test-B: test-fsck test-recovery test-grubfallback
 
-.PHONY: test-fsck
-test-fsck: test-active
-	VM_PID=$$(scripts/run_vm.sh vmpid) go run $(GINKGO) $(GINKGO_ARGS) ./tests/fsck
+.PHONY: test-disk-expand
+test-disk-expand: prepare-expanded-disk
+	echo $@
+	VM_PID=$$(ELMNTL_PREFIX=expand scripts/run_vm.sh vmpid) && [ -n $$VM_PID ] && go run $(GINKGO) $(GINKGO_ARGS) ./tests/wait-active
+	ELMNTL_PREFIX=expand scripts/run_vm.sh stop
 
-.PHONY: test-upgrade
-test-upgrade: test-active
-	VM_PID=$$(scripts/run_vm.sh vmpid) go run $(GINKGO) $(GINKGO_ARGS) ./tests/upgrade
+.PHONY: prepare-expanded-disk
+prepare-expanded-disk:
+ifeq ("$(DISK)","")
+	echo "No disk image found, run 'make build-disk' first"
+	exit 1
+endif
+	echo $@
+	[ -f $(EXPANDED_DISK) ] || (ELMNTL_PREFIX=$(EXPAND_PREFIX) scripts/run_vm.sh start $(DISK) && echo "VM started from $(DISK)")
+
+.PHONY: prepare-test-%
+prepare-test-%: test-disk-expand
+	echo $@
+	[ -f $(EXPANDED_DISK) ] || (echo "No expanded disk image found!" && exit 1)
+	ELMNTL_PREFIX=$* scripts/run_vm.sh start $(EXPANDED_DISK)
+	echo "VM started from $(EXPANDED_DISK)"
 
 .PHONY: test-deps
 test-deps:
