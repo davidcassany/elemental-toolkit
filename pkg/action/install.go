@@ -25,14 +25,16 @@ import (
 	cnst "github.com/rancher/elemental-toolkit/pkg/constants"
 	"github.com/rancher/elemental-toolkit/pkg/elemental"
 	elementalError "github.com/rancher/elemental-toolkit/pkg/error"
+	"github.com/rancher/elemental-toolkit/pkg/snapshotter"
 	v1 "github.com/rancher/elemental-toolkit/pkg/types/v1"
 	"github.com/rancher/elemental-toolkit/pkg/utils"
 )
 
 type InstallAction struct {
-	cfg        *v1.RunConfig
-	spec       *v1.InstallSpec
-	bootloader v1.Bootloader
+	cfg         *v1.RunConfig
+	spec        *v1.InstallSpec
+	bootloader  v1.Bootloader
+	snapshotter v1.Snapshotter
 }
 
 type InstallActionOption func(i *InstallAction) error
@@ -57,6 +59,10 @@ func NewInstallAction(cfg *v1.RunConfig, spec *v1.InstallSpec, opts ...InstallAc
 
 	if i.bootloader == nil {
 		i.bootloader = bootloader.NewGrub(&cfg.Config, bootloader.WithGrubDisableBootEntry(i.spec.DisableBootEntry))
+	}
+
+	if i.snapshotter == nil {
+		i.snapshotter = snapshotter.NewLoopDeviceSnapshotter(cfg.Config, spec.SnapshotterCfg, i.bootloader)
 	}
 
 	return i
@@ -86,10 +92,10 @@ func (i *InstallAction) createInstallStateYaml(sysMeta, recMeta interface{}) err
 
 	// If recovery image is a copyied file from active reuse the same source and metadata
 	recSource := i.spec.Recovery.Source
-	if i.spec.Recovery.Source.IsFile() && i.spec.Active.File == i.spec.Recovery.Source.Value() {
+	/*if i.spec.Recovery.Source.IsFile() && i.spec.Active.Path == i.spec.Recovery.Source.Value() {
 		recMeta = sysMeta
-		recSource = i.spec.Active.Source
-	}
+		recSource = i.spec.Active
+	}*/
 
 	installState := &v1.InstallState{
 		Date: time.Now().Format(time.RFC3339),
@@ -98,16 +104,10 @@ func (i *InstallAction) createInstallStateYaml(sysMeta, recMeta interface{}) err
 				FSLabel: i.spec.Partitions.State.FilesystemLabel,
 				Images: map[string]*v1.ImageState{
 					cnst.ActiveImgName: {
-						Source:         i.spec.Active.Source,
+						Source:         i.spec.Active,
 						SourceMetadata: sysMeta,
-						Label:          i.spec.Active.Label,
-						FS:             i.spec.Active.FS,
-					},
-					cnst.PassiveImgName: {
-						Source:         i.spec.Active.Source,
-						SourceMetadata: sysMeta,
-						Label:          i.spec.Passive.Label,
-						FS:             i.spec.Passive.FS,
+						//Label:          i.spec.Active.Label,
+						FS: i.spec.SnapshotterCfg.FS,
 					},
 				},
 			},
@@ -149,6 +149,8 @@ func (i *InstallAction) createInstallStateYaml(sysMeta, recMeta interface{}) err
 
 // InstallRun will install the system from a given configuration
 func (i InstallAction) Run() (err error) {
+	var activeSnap *v1.Snapshot
+
 	cleanup := utils.NewCleanStack()
 	defer func() { err = cleanup.Cleanup(err) }()
 
@@ -159,7 +161,7 @@ func (i InstallAction) Run() (err error) {
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.Unknown)
 		}
-		i.spec.Active.Source = source
+		i.spec.Active = source
 	}
 
 	// Partition and format device if needed
@@ -176,7 +178,11 @@ func (i InstallAction) Run() (err error) {
 		return elemental.UnmountPartitions(i.cfg.Config, i.spec.Partitions.PartitionsByMountPoint(true))
 	})
 
-	//TODO init snapshotter
+	err = i.snapshotter.InitSnapshotter(i.spec.Partitions.State.MountPoint)
+	if err != nil {
+		// TODO add init snaphotter error
+		return err
+	}
 
 	// Before install hook happens after partitioning but before the image OS is applied
 	err = i.installHook(cnst.BeforeInstallHook)
@@ -184,78 +190,34 @@ func (i InstallAction) Run() (err error) {
 		return elementalError.NewFromError(err, elementalError.HookBeforeInstall)
 	}
 
-	// TODO set workingImgDir
+	activeSnap, err = i.snapshotter.StartTransaction()
+	if err != nil {
+		//TODO snapshotter error
+		return err
+	}
+	cleanup.PushErrorOnly(func() error { return i.snapshotter.CloseTransactionOnError(activeSnap) })
 
 	// Deploy active image
-	systemMeta, treeCleaner, err := elemental.DeployImgTree(i.cfg.Config, &i.spec.Active, cnst.WorkingImgDir)
+	systemMeta, err := elemental.DumpSource(i.cfg.Config, activeSnap.WorkDir, i.spec.Active)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.DeployImgTree)
 	}
-	cleanup.Push(func() error { return treeCleaner() })
 
-	// Copy cloud-init if any
-	err = elemental.CopyCloudConfig(i.cfg.Config, i.spec.Partitions.GetConfigStorage(), i.spec.CloudInit)
+	err = i.refineDeployment(activeSnap.WorkDir)
 	if err != nil {
-		return elementalError.NewFromError(err, elementalError.CopyFile)
-	}
-	// Install grub
-	err = i.bootloader.Install(
-		cnst.WorkingImgDir,
-		i.spec.Partitions.State.MountPoint,
-		i.spec.Partitions.State.FilesystemLabel,
-	)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.InstallGrub)
+		i.cfg.Logger.Errorf("failed refining dumped OS tree: %v", err)
+		return err
 	}
 
-	// Relabel SELinux
-	err = i.applySelinuxLabels()
+	err = i.snapshotter.CloseTransaction(activeSnap)
 	if err != nil {
-		return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
-	}
-
-	err = i.installChrootHook(cnst.AfterInstallChrootHook, cnst.WorkingImgDir)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.HookAfterInstallChroot)
-	}
-	err = i.installHook(cnst.AfterInstallHook)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.HookAfterInstall)
-	}
-
-	grubVars := i.spec.GetGrubLabels()
-	err = i.bootloader.SetPersistentVariables(
-		filepath.Join(i.spec.Partitions.State.MountPoint, cnst.GrubOEMEnv),
-		grubVars,
-	)
-	if err != nil {
-		i.cfg.Logger.Error("Error setting GRUB labels: %s", err)
-		return elementalError.NewFromError(err, elementalError.SetGrubVariables)
-	}
-
-	// Installation rebrand (only grub for now)
-	err = i.bootloader.SetDefaultEntry(
-		i.spec.Partitions.State.MountPoint,
-		cnst.WorkingImgDir,
-		i.spec.GrubDefEntry,
-	)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
-	}
-
-	err = elemental.CreateImageFromTree(i.cfg.Config, &i.spec.Active, cnst.WorkingImgDir, false)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.CreateImgFromTree)
-	}
-	err = treeCleaner()
-	if err != nil {
-		i.cfg.Config.Logger.Errorf("failed cleaning active image tree: %v", err)
+		i.cfg.Logger.Errorf("failed closing snapshot transaction: %v", err)
 		return err
 	}
 
 	// Install Recovery
 	var recoveryMeta interface{}
-	if i.spec.Recovery.Source.IsFile() && i.spec.Active.File == i.spec.Recovery.Source.Value() && i.spec.Active.FS == i.spec.Recovery.FS {
+	if i.spec.Recovery.Source.IsFile() && activeSnap.Path == i.spec.Recovery.Source.Value() && i.spec.SnapshotterCfg.FS == i.spec.Recovery.FS {
 		// Reuse image file from active image
 		err := elemental.CopyFileImg(i.cfg.Config, &i.spec.Recovery)
 		if err != nil {
@@ -266,13 +228,6 @@ func (i InstallAction) Run() (err error) {
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.DeployImage)
 		}
-	}
-
-	// TODO no passive installation
-	// Install Passive
-	err = elemental.CopyFileImg(i.cfg.Config, &i.spec.Passive)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.DeployImage)
 	}
 
 	err = i.installHook(cnst.PostInstallHook)
@@ -304,18 +259,62 @@ func (i InstallAction) Run() (err error) {
 	return PowerAction(i.cfg)
 }
 
-// applySelinuxLabels sets SELinux extended attributes to the root-tree being installed
-func (i *InstallAction) applySelinuxLabels() error {
-	binds := map[string]string{}
-	if mnt, _ := utils.IsMounted(i.cfg.Config, i.spec.Partitions.Persistent); mnt {
-		binds[i.spec.Partitions.Persistent.MountPoint] = cnst.UsrLocalPath
+func (i *InstallAction) refineDeployment(workDir string) error {
+	// Copy cloud-init if any
+	err := elemental.CopyCloudConfig(i.cfg.Config, i.spec.Partitions.GetConfigStorage(), i.spec.CloudInit)
+	if err != nil {
+		return elementalError.NewFromError(err, elementalError.CopyFile)
 	}
-	if mnt, _ := utils.IsMounted(i.cfg.Config, i.spec.Partitions.OEM); mnt {
-		binds[i.spec.Partitions.OEM.MountPoint] = cnst.OEMPath
-	}
-	return utils.ChrootedCallback(
-		&i.cfg.Config, cnst.WorkingImgDir, binds, func() error { return elemental.SelinuxRelabel(i.cfg.Config, "/", true) },
+	// Install grub
+	err = i.bootloader.Install(
+		workDir,
+		i.spec.Partitions.State.MountPoint,
+		i.spec.Partitions.State.FilesystemLabel,
 	)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed installing grub: %v", err)
+		return elementalError.NewFromError(err, elementalError.InstallGrub)
+	}
+
+	// Relabel SELinux
+	err = applySelinuxLabels(i.cfg.Config, i.spec.Partitions)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed setting SELinux labels: %v", err)
+		return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
+	}
+
+	err = i.installChrootHook(cnst.AfterInstallChrootHook, cnst.WorkingImgDir)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed after-install-chroot hook: %v", err)
+		return elementalError.NewFromError(err, elementalError.HookAfterInstallChroot)
+	}
+	err = i.installHook(cnst.AfterInstallHook)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed after-install hook: %v", err)
+		return elementalError.NewFromError(err, elementalError.HookAfterInstall)
+	}
+
+	grubVars := i.spec.GetGrubLabels()
+	err = i.bootloader.SetPersistentVariables(
+		filepath.Join(i.spec.Partitions.State.MountPoint, cnst.GrubOEMEnv),
+		grubVars,
+	)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed setting GRUB labels: %v", err)
+		return elementalError.NewFromError(err, elementalError.SetGrubVariables)
+	}
+
+	// Installation rebrand (only grub for now)
+	err = i.bootloader.SetDefaultEntry(
+		i.spec.Partitions.State.MountPoint,
+		cnst.WorkingImgDir,
+		i.spec.GrubDefEntry,
+	)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed setting defaut GRUB entry: %v", err)
+		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
+	}
+	return nil
 }
 
 func (i *InstallAction) prepareDevice() error {

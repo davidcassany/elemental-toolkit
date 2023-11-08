@@ -25,6 +25,7 @@ import (
 	cnst "github.com/rancher/elemental-toolkit/pkg/constants"
 	"github.com/rancher/elemental-toolkit/pkg/elemental"
 	elementalError "github.com/rancher/elemental-toolkit/pkg/error"
+	"github.com/rancher/elemental-toolkit/pkg/snapshotter"
 	v1 "github.com/rancher/elemental-toolkit/pkg/types/v1"
 	"github.com/rancher/elemental-toolkit/pkg/utils"
 )
@@ -56,9 +57,10 @@ func WithResetBootloader(bootloader v1.Bootloader) func(r *ResetAction) error {
 }
 
 type ResetAction struct {
-	cfg        *v1.RunConfig
-	spec       *v1.ResetSpec
-	bootloader v1.Bootloader
+	cfg         *v1.RunConfig
+	spec        *v1.ResetSpec
+	bootloader  v1.Bootloader
+	snapshotter v1.Snapshotter
 }
 
 func NewResetAction(cfg *v1.RunConfig, spec *v1.ResetSpec, opts ...ResetActionOption) *ResetAction {
@@ -79,6 +81,10 @@ func NewResetAction(cfg *v1.RunConfig, spec *v1.ResetSpec, opts ...ResetActionOp
 		)
 	}
 
+	if r.snapshotter == nil {
+		r.snapshotter = snapshotter.NewLoopDeviceSnapshotter(cfg.Config, spec.SnapshotterCfg, r.bootloader)
+	}
+
 	return r
 }
 
@@ -94,16 +100,9 @@ func (r *ResetAction) updateInstallState(cleanup *utils.CleanStack, meta interfa
 				FSLabel: r.spec.Partitions.State.FilesystemLabel,
 				Images: map[string]*v1.ImageState{
 					cnst.ActiveImgName: {
-						Source:         r.spec.Active.Source,
+						Source:         r.spec.Active,
 						SourceMetadata: meta,
-						Label:          r.spec.Active.Label,
-						FS:             r.spec.Active.FS,
-					},
-					cnst.PassiveImgName: {
-						Source:         r.spec.Active.Source,
-						SourceMetadata: meta,
-						Label:          r.spec.Passive.Label,
-						FS:             r.spec.Passive.FS,
+						FS:             r.spec.SnapshotterCfg.FS,
 					},
 				},
 			},
@@ -138,13 +137,13 @@ func (r *ResetAction) updateInstallState(cleanup *utils.CleanStack, meta interfa
 
 // ResetRun will reset the cos system to by following several steps
 func (r ResetAction) Run() (err error) {
+	var activeSnap *v1.Snapshot
+
 	cleanup := utils.NewCleanStack()
 	defer func() { err = cleanup.Cleanup(err) }()
 
 	// Unmount partitions if any is already mounted before formatting
-	err = elemental.UnmountPartitions(
-		r.cfg.Config, r.spec.Partitions.PartitionsByMountPoint(true, r.spec.Partitions.Recovery),
-	)
+	err = elemental.UnmountPartitions(r.cfg.Config, r.spec.Partitions.PartitionsByMountPoint(true, r.spec.Partitions.Recovery))
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.UnmountPartitions)
 	}
@@ -185,97 +184,40 @@ func (r ResetAction) Run() (err error) {
 		return elemental.UnmountPartitions(r.cfg.Config, r.spec.Partitions.PartitionsByMountPoint(true, r.spec.Partitions.Recovery))
 	})
 
+	err = r.snapshotter.InitSnapshotter(r.spec.Partitions.State.MountPoint)
+	if err != nil {
+		// TODO add init snaphotter error
+		return err
+	}
+
 	// Before reset hook happens once partitions are aready and before deploying the OS image
 	err = r.resetHook(cnst.BeforeResetHook)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.HookBeforeReset)
 	}
 
+	activeSnap, err = r.snapshotter.StartTransaction()
+	if err != nil {
+		return err
+	}
+	cleanup.PushErrorOnly(func() error { return r.snapshotter.CloseTransactionOnError(activeSnap) })
+
 	// Deploy active image
-	meta, treeCleaner, err := elemental.DeployImgTree(r.cfg.Config, &r.spec.Active, cnst.WorkingImgDir)
+	meta, err := elemental.DumpSource(r.cfg.Config, activeSnap.WorkDir, r.spec.Active)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.DeployImgTree)
 	}
-	cleanup.Push(func() error { return treeCleaner() })
 
-	// Copy cloud-init if any
-	err = elemental.CopyCloudConfig(r.cfg.Config, r.spec.Partitions.GetConfigStorage(), r.spec.CloudInit)
+	err = r.refineDeployment(activeSnap.WorkDir)
 	if err != nil {
-		return elementalError.NewFromError(err, elementalError.CopyFile)
-	}
-
-	// install grub
-	err = r.bootloader.Install(
-		cnst.WorkingImgDir,
-		r.spec.Partitions.State.MountPoint,
-		r.spec.Partitions.State.FilesystemLabel,
-	)
-
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.InstallGrub)
-	}
-
-	// Relabel SELinux
-	// TODO probably relabelling persistent volumes should be an opt in feature, it could
-	// have undesired effects in case of failures
-	binds := map[string]string{}
-	if mnt, _ := utils.IsMounted(r.cfg.Config, r.spec.Partitions.Persistent); mnt {
-		binds[r.spec.Partitions.Persistent.MountPoint] = cnst.UsrLocalPath
-	}
-	if mnt, _ := utils.IsMounted(r.cfg.Config, r.spec.Partitions.OEM); mnt {
-		binds[r.spec.Partitions.OEM.MountPoint] = cnst.OEMPath
-	}
-	err = utils.ChrootedCallback(
-		&r.cfg.Config, cnst.WorkingImgDir, binds,
-		func() error { return elemental.SelinuxRelabel(r.cfg.Config, "/", true) },
-	)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
-	}
-
-	err = r.resetChrootHook(cnst.AfterResetChrootHook, cnst.WorkingImgDir)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.HookAfterResetChroot)
-	}
-	err = r.resetHook(cnst.AfterResetHook)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.HookAfterReset)
-	}
-
-	grubVars := r.spec.GetGrubLabels()
-	err = r.bootloader.SetPersistentVariables(
-		filepath.Join(r.spec.Partitions.State.MountPoint, cnst.GrubOEMEnv),
-		grubVars,
-	)
-	if err != nil {
-		r.cfg.Logger.Error("Error setting GRUB labels: %s", err)
-		return elementalError.NewFromError(err, elementalError.SetGrubVariables)
-	}
-
-	// installation rebrand (only grub for now)
-	err = r.bootloader.SetDefaultEntry(
-		r.spec.Partitions.State.MountPoint,
-		cnst.WorkingImgDir,
-		r.spec.GrubDefEntry,
-	)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
-	}
-
-	err = elemental.CreateImageFromTree(r.cfg.Config, &r.spec.Active, cnst.WorkingImgDir, false)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.CreateImgFromTree)
-	}
-	err = treeCleaner()
-	if err != nil {
-		r.cfg.Config.Logger.Errorf("failed cleaning active root tree: %v", err)
+		r.cfg.Logger.Errorf("failed refining dumped OS tree: %v", err)
 		return err
 	}
 
-	// Install Passive
-	err = elemental.CopyFileImg(r.cfg.Config, &r.spec.Passive)
+	err = r.snapshotter.CloseTransaction(activeSnap)
 	if err != nil {
-		return elementalError.NewFromError(err, elementalError.DeployImage)
+		r.cfg.Logger.Errorf("failed closing snapshot transaction: %v", err)
+		return err
 	}
 
 	err = r.resetHook(cnst.PostResetHook)
@@ -295,4 +237,63 @@ func (r ResetAction) Run() (err error) {
 	}
 
 	return PowerAction(r.cfg)
+}
+
+func (r *ResetAction) refineDeployment(workDir string) error {
+	// Copy cloud-init if any
+	err := elemental.CopyCloudConfig(r.cfg.Config, r.spec.Partitions.GetConfigStorage(), r.spec.CloudInit)
+	if err != nil {
+		return elementalError.NewFromError(err, elementalError.CopyFile)
+	}
+
+	// install grub
+	err = r.bootloader.Install(
+		workDir,
+		r.spec.Partitions.State.MountPoint,
+		r.spec.Partitions.State.FilesystemLabel,
+	)
+	if err != nil {
+		r.cfg.Logger.Errorf("failed installing grub: %v", err)
+		return elementalError.NewFromError(err, elementalError.InstallGrub)
+	}
+
+	// Relabel SELinux
+	err = applySelinuxLabels(r.cfg.Config, r.spec.Partitions)
+	if err != nil {
+		r.cfg.Logger.Errorf("failed setting SELinux labels: %v", err)
+		return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
+	}
+
+	err = r.resetChrootHook(cnst.AfterResetChrootHook, cnst.WorkingImgDir)
+	if err != nil {
+		r.cfg.Logger.Errorf("failed after-reset-chroot hook: %v", err)
+		return elementalError.NewFromError(err, elementalError.HookAfterResetChroot)
+	}
+	err = r.resetHook(cnst.AfterResetHook)
+	if err != nil {
+		r.cfg.Logger.Errorf("failed after-reset hook: %v", err)
+		return elementalError.NewFromError(err, elementalError.HookAfterReset)
+	}
+
+	grubVars := r.spec.GetGrubLabels()
+	err = r.bootloader.SetPersistentVariables(
+		filepath.Join(r.spec.Partitions.State.MountPoint, cnst.GrubOEMEnv),
+		grubVars,
+	)
+	if err != nil {
+		r.cfg.Logger.Errorf("failed setting GRUB labels: %v", err)
+		return elementalError.NewFromError(err, elementalError.SetGrubVariables)
+	}
+
+	// installation rebrand (only grub for now)
+	err = r.bootloader.SetDefaultEntry(
+		r.spec.Partitions.State.MountPoint,
+		cnst.WorkingImgDir,
+		r.spec.GrubDefEntry,
+	)
+	if err != nil {
+		r.cfg.Logger.Errorf("failed setting defaut GRUB entry: %v", err)
+		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
+	}
+	return nil
 }

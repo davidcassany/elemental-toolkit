@@ -70,17 +70,21 @@ const (
 	InitrdPath       = "/boot/initrd"
 	ElementalInitrd  = "/boot/elemental.initrd"
 
-	// Bootloader constants
+	// EFI firmware constants
 	EntryEFIPath    = "/EFI/ELEMENTAL"
 	FallbackEFIPath = "/EFI/BOOT"
 	BootEntryName   = "elemental-shim"
 	EfiImgX86       = "bootx64.efi"
 	EfiImgArm64     = "bootaa64.efi"
+
+	// Grub constants
 	GrubCfg         = "grub.cfg"
 	GrubCfgPath     = "/etc/cos"
 	GrubOEMEnv      = "grub_oem_env"
 	GrubEnv         = "grubenv"
 	GrubDefEntry    = "Elemental"
+	GrubFallbackVar = "default_fallback"
+	GrubSnapsVar    = "passive_snaps"
 
 	// Mountpoints of images and partitions
 	RecoveryDir     = "/run/cos/recovery"
@@ -104,10 +108,14 @@ const (
 	LiveDir     = "/run/initramfs/live"
 
 	// Image file names
-	ActiveImgFile     = "active.img"
-	PassiveImgFile    = "passive.img"
+	ActiveImgFile     = "active.img"  //TODO deleteme in favor of ActiveSnap
+	PassiveImgFile    = "passive.img" // TODO deleteme in facor of PassiveSnap
 	RecoveryImgFile   = "recovery.img"
 	TransitionImgFile = "transition.img"
+
+	// Snapshots names
+	ActiveSnap  = "active"
+	PassiveSnap = "passive_%d"
 
 	// Yip stages evaluated on reset/upgrade/install/build-disk actions
 	AfterInstallChrootHook = "after-install-chroot"

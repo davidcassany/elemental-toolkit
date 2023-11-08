@@ -19,6 +19,8 @@ package action
 import (
 	"github.com/sirupsen/logrus"
 
+	"github.com/rancher/elemental-toolkit/pkg/constants"
+	"github.com/rancher/elemental-toolkit/pkg/elemental"
 	elementalError "github.com/rancher/elemental-toolkit/pkg/error"
 	v1 "github.com/rancher/elemental-toolkit/pkg/types/v1"
 	"github.com/rancher/elemental-toolkit/pkg/utils"
@@ -68,4 +70,18 @@ func PowerAction(cfg *v1.RunConfig) error {
 	}
 
 	return elementalError.NewFromError(err, code)
+}
+
+// applySelinuxLabels sets SELinux extended attributes to the root-tree being installed
+func applySelinuxLabels(c v1.Config, parts v1.ElementalPartitions) error {
+	binds := map[string]string{}
+	if mnt, _ := utils.IsMounted(c, parts.Persistent); mnt {
+		binds[parts.Persistent.MountPoint] = constants.UsrLocalPath
+	}
+	if mnt, _ := utils.IsMounted(c, parts.OEM); mnt {
+		binds[parts.OEM.MountPoint] = constants.OEMPath
+	}
+	return utils.ChrootedCallback(
+		&c, constants.WorkingImgDir, binds, func() error { return elemental.SelinuxRelabel(c, "/", true) },
+	)
 }

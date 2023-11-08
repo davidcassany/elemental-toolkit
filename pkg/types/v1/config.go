@@ -184,16 +184,16 @@ type InstallSpec struct {
 	CloudInit        []string            `yaml:"cloud-init,omitempty" mapstructure:"cloud-init"`
 	Iso              string              `yaml:"iso,omitempty" mapstructure:"iso"`
 	GrubDefEntry     string              `yaml:"grub-entry-name,omitempty" mapstructure:"grub-entry-name"`
-	Active           Image               `yaml:"system,omitempty" mapstructure:"system"`
+	Active           *ImageSource        `yaml:"system,omitempty" mapstructure:"system"`
 	Recovery         Image               `yaml:"recovery-system,omitempty" mapstructure:"recovery-system"`
-	Passive          Image
-	DisableBootEntry bool `yaml:"disable-boot-entry,omitempty" mapstructure:"disable-boot-entry"`
+	DisableBootEntry bool                `yaml:"disable-boot-entry,omitempty" mapstructure:"disable-boot-entry"`
+	SnapshotterCfg   *SnapshotterConfig  `yaml:"snapshotter,omitempty" mapstructure:"snapshotter"`
 }
 
 // Sanitize checks the consistency of the struct, returns error
 // if unsolvable inconsistencies are found
 func (i *InstallSpec) Sanitize() error {
-	if i.Active.Source.IsEmpty() && i.Iso == "" {
+	if i.Active.IsEmpty() && i.Iso == "" {
 		return fmt.Errorf("undefined system source to install")
 	}
 	if i.Partitions.State == nil || i.Partitions.State.MountPoint == "" {
@@ -201,10 +201,9 @@ func (i *InstallSpec) Sanitize() error {
 	}
 
 	// Unset labels for squashfs filesystem
-	if i.Active.FS == constants.SquashFs {
-		i.Active.Label = ""
-		i.Passive.Label = ""
-	}
+	//if i.SnapshotterCfg.FS == constants.SquashFs {
+	//	i.Active.Label = ""
+	//}
 	if i.Recovery.FS == constants.SquashFs {
 		i.Recovery.Label = ""
 	}
@@ -239,42 +238,38 @@ type ResetSpec struct {
 	FormatPersistent bool `yaml:"reset-persistent,omitempty" mapstructure:"reset-persistent"`
 	FormatOEM        bool `yaml:"reset-oem,omitempty" mapstructure:"reset-oem"`
 
-	CloudInit        []string `yaml:"cloud-init,omitempty" mapstructure:"cloud-init"`
-	GrubDefEntry     string   `yaml:"grub-entry-name,omitempty" mapstructure:"grub-entry-name"`
-	Active           Image    `yaml:"system,omitempty" mapstructure:"system"`
-	Passive          Image
+	CloudInit        []string     `yaml:"cloud-init,omitempty" mapstructure:"cloud-init"`
+	GrubDefEntry     string       `yaml:"grub-entry-name,omitempty" mapstructure:"grub-entry-name"`
+	Active           *ImageSource `yaml:"system,omitempty" mapstructure:"system"`
 	Partitions       ElementalPartitions
 	Target           string
 	Efi              bool
 	State            *InstallState
-	DisableBootEntry bool `yaml:"disable-boot-entry,omitempty" mapstructure:"disable-boot-entry"`
+	DisableBootEntry bool               `yaml:"disable-boot-entry,omitempty" mapstructure:"disable-boot-entry"`
+	SnapshotterCfg   *SnapshotterConfig `yaml:"snapshotter,omitempty" mapstructure:"snapshotter"`
 }
 
 // Sanitize checks the consistency of the struct, returns error
 // if unsolvable inconsistencies are found
 func (r *ResetSpec) Sanitize() error {
-	if r.Active.Source.IsEmpty() {
+	if r.Active.IsEmpty() {
 		return fmt.Errorf("undefined system source to reset to")
 	}
 	if r.Partitions.State == nil || r.Partitions.State.MountPoint == "" {
 		return fmt.Errorf("undefined state partition")
 	}
-	// Unset labels for squashfs filesystem
-	if r.Active.FS == constants.SquashFs {
-		r.Active.Label = ""
-		r.Passive.Label = ""
-	}
+
 	return nil
 }
 
 type UpgradeSpec struct {
-	RecoveryUpgrade bool   `yaml:"recovery,omitempty" mapstructure:"recovery"`
-	Active          Image  `yaml:"system,omitempty" mapstructure:"system"`
-	Recovery        Image  `yaml:"recovery-system,omitempty" mapstructure:"recovery-system"`
-	GrubDefEntry    string `yaml:"grub-entry-name,omitempty" mapstructure:"grub-entry-name"`
-	Passive         Image
+	RecoveryUpgrade bool         `yaml:"recovery,omitempty" mapstructure:"recovery"`
+	Active          *ImageSource `yaml:"system,omitempty" mapstructure:"system"`
+	Recovery        Image        `yaml:"recovery-system,omitempty" mapstructure:"recovery-system"`
+	GrubDefEntry    string       `yaml:"grub-entry-name,omitempty" mapstructure:"grub-entry-name"`
 	Partitions      ElementalPartitions
 	State           *InstallState
+	SnapshotterCfg  *SnapshotterConfig `yaml:"snapshotter,omitempty" mapstructure:"snapshotter"`
 }
 
 // Sanitize checks the consistency of the struct, returns error
@@ -291,15 +286,11 @@ func (u *UpgradeSpec) Sanitize() error {
 		if u.Partitions.State == nil || u.Partitions.State.MountPoint == "" {
 			return fmt.Errorf("undefined state partition")
 		}
-		if u.Active.Source.IsEmpty() {
+		if u.Active.IsEmpty() {
 			return fmt.Errorf("undefined upgrade source")
 		}
 	}
-	// Unset labels for squashfs filesystem
-	if u.Active.FS == constants.SquashFs {
-		u.Active.Label = ""
-		u.Passive.Label = ""
-	}
+
 	if u.Recovery.FS == constants.SquashFs {
 		u.Recovery.Label = ""
 	}
