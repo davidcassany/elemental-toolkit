@@ -176,11 +176,15 @@ func (i InstallAction) Run() (err error) {
 		return e.UnmountPartitions(i.spec.Partitions.PartitionsByMountPoint(true))
 	})
 
+	//TODO init snapshotter
+
 	// Before install hook happens after partitioning but before the image OS is applied
 	err = i.installHook(cnst.BeforeInstallHook)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.HookBeforeInstall)
 	}
+
+	// TODO set workingImgDir
 
 	// Deploy active image
 	systemMeta, treeCleaner, err := e.DeployImgTree(&i.spec.Active, cnst.WorkingImgDir)
@@ -259,6 +263,7 @@ func (i InstallAction) Run() (err error) {
 		}
 	}
 
+	// TODO no passive installation
 	// Install Passive
 	err = e.CopyFileImg(&i.spec.Passive)
 	if err != nil {
