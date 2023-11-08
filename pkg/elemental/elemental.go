@@ -608,11 +608,10 @@ func (e Elemental) UpdateSourceFormISO(iso string, activeImg *v1.Image) (func() 
 
 // DeactivateDevice deactivates unmounted the block devices present within the system.
 // Useful to deactivate LVM volumes, if any, related to the target device.
-func (e Elemental) DeactivateDevices() error {
-	out, err := e.config.Runner.Run(
+func (e Elemental) DeactivateDevices() {
+	// This is a best effort call, it does not error out
+	e.config.Runner.RunNoError(
 		"blkdeactivate", "--lvmoptions", "retry,wholevg",
 		"--dmoptions", "force,retry", "--errors",
 	)
-	e.config.Logger.Debugf("blkdeactivate command output: %s", string(out))
-	return err
 }

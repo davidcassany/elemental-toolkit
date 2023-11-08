@@ -24,6 +24,8 @@ import (
 	v1 "github.com/rancher/elemental-toolkit/pkg/types/v1"
 )
 
+var _ v1.Runner = (*FakeRunner)(nil)
+
 type FakeRunner struct {
 	cmds        [][]string
 	ReturnValue []byte
@@ -49,6 +51,14 @@ func (r *FakeRunner) Run(command string, args ...string) ([]byte, error) {
 		r.error(fmt.Sprintf("Error running command: %s", err.Error()))
 	}
 	return out, err
+}
+
+func (r *FakeRunner) RunNoError(command string, args ...string) {
+	if !r.CommandExists(command) {
+		return
+	}
+	r.InitCmd(command, args...)
+	r.RunCmd(nil)
 }
 
 func (r *FakeRunner) RunCmd(_ *exec.Cmd) ([]byte, error) {

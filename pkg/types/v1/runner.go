@@ -25,6 +25,7 @@ import (
 type Runner interface {
 	InitCmd(string, ...string) *exec.Cmd
 	Run(string, ...string) ([]byte, error)
+	RunNoError(string, ...string)
 	RunCmd(cmd *exec.Cmd) ([]byte, error)
 	CommandExists(command string) bool
 	GetLogger() Logger
@@ -58,6 +59,18 @@ func (r RealRunner) Run(command string, args ...string) ([]byte, error) {
 	return out, err
 }
 
+func (r RealRunner) RunNoError(command string, args ...string) {
+	if !r.CommandExists(command) {
+		return
+	}
+	r.debug(fmt.Sprintf("Running cmd: '%s %s'", command, strings.Join(args, " ")))
+	cmd := r.InitCmd(command, args...)
+	_, err := r.RunCmd(cmd)
+	if err != nil {
+		r.warning(fmt.Sprintf("failed running command: %s", err.Error()))
+	}
+}
+
 func (r RealRunner) GetLogger() Logger {
 	return r.Logger
 }
@@ -75,5 +88,11 @@ func (r RealRunner) error(msg string) {
 func (r RealRunner) debug(msg string) {
 	if r.Logger != nil {
 		r.Logger.Debug(msg)
+	}
+}
+
+func (r RealRunner) warning(msg string) {
+	if r.Logger != nil {
+		r.Logger.Warn(msg)
 	}
 }

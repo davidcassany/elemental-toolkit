@@ -322,12 +322,9 @@ func (i *InstallAction) prepareDevice(e *elemental.Elemental) error {
 		}
 	} else {
 		// Deactivate any active volume on target
-		err := e.DeactivateDevices()
-		if err != nil {
-			return elementalError.NewFromError(err, elementalError.DeactivatingDevices)
-		}
+		e.DeactivateDevices()
 		// Partition device
-		err = e.PartitionAndFormatDevice(i.spec)
+		err := e.PartitionAndFormatDevice(i.spec)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.PartitioningDevice)
 		}

@@ -118,7 +118,7 @@ func (pc *partedCall) WriteChanges() (string, error) {
 	out, err := pc.runner.Run("parted", opts...)
 
 	// Notify kernel of partition table changes, swallows errors, just a best effort call
-	_, _ = pc.runner.Run("partx", "-u", pc.dev)
+	pc.runner.RunNoError("partx", "-u", pc.dev)
 	pc.wipe = false
 	pc.parts = []*Partition{}
 	pc.deletions = []int{}

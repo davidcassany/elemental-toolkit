@@ -28,16 +28,18 @@ Source1:        %{name}.obsinfo
 
 Requires:       dosfstools
 Requires:       e2fsprogs
-# for blkdeactivate
-Requires: lvm2
+Requires:       btrfsprogs
+Requires:       xfsprogs
 Requires:       parted
 Requires:       rsync
 Requires:       udev
-Requires:       xfsprogs
 Requires:       xorriso
 Requires:       mtools
 Requires:       util-linux
 Requires:       gptfdisk
+
+# for blkdeactivate
+Recommends:     lvm2
 
 %if 0%{?suse_version}
 BuildRequires:  golang(API) >= 1.18

@@ -965,8 +965,7 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 	Describe("DeactivateDevices", Label("blkdeactivate"), func() {
 		It("calls blkdeactivat", func() {
 			el := elemental.NewElemental(config)
-			err := el.DeactivateDevices()
-			Expect(err).ShouldNot(HaveOccurred())
+			el.DeactivateDevices()
 			Expect(runner.CmdsMatch([][]string{{
 				"blkdeactivate", "--lvmoptions", "retry,wholevg",
 				"--dmoptions", "force,retry", "--errors",
