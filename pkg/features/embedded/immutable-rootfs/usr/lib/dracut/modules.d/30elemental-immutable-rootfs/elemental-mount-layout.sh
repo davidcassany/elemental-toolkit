@@ -249,6 +249,8 @@ declare cos_layout="/run/cos/cos-layout.env"
 declare root_fstype=$(findmnt -rno FSTYPE /sysroot)
 declare root=$(findmnt -rno SOURCE /sysroot)
 declare base_part=$(findmnt -rno SOURCE /run/cos/root)
+declare snapshots_mnt="/.snapshots"
+declare snapshots_vol="@/.snapshots"
 declare partname
 declare fstab
 declare state_paths
@@ -260,12 +262,24 @@ readLayoutConfig
 
 [ -z "${cos_overlay}" ] && exit 0
 
+# Hack to get the root device and its mounted subvolume
+snapshot=${root##*[}
+snapshot=${snapshot%%]}
+root=${root%%[*}
+
 # If sysroot is already an overlay do not prepare the rw overlay
 if [ "${root_fstype}" != "overlay" ]; then
     if [ -f "${base_part}" ]; then
         fstab="${base_part} /run/initramfs/cos-state auto ${cos_root_perm} 0 0\n"
     fi
-    fstab+="${root} / auto ${cos_root_perm} 0 0\n"
+
+    if [ "${root_fstype}" == "btrfs" ]; then
+        fstab+="${root} / auto ${cos_root_perm},subvol=${snapshot} 0 0\n"
+        fstab+="${root} ${snapshots_mnt} auto defaults,subvol=${snapshots_vol} 0 0\n"
+    else
+        fstab+="${root} / auto ${cos_root_perm} 0 0\n"
+    fi
+
     fstab+=$(mountOverlayBase)
 fi
 
