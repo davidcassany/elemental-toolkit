@@ -13,7 +13,7 @@ qemu-img create -f raw disk.img 16G
 loopdev=$(losetup -f --show disk.img)
 
 # Just to create the basi disk layout and EFI partition
-./build/elemental --debug install --local --system.uri ${osimage} ${loopdev}
+./build/elemental --debug install --firmware efi --disable-boot-entry --local --system.uri ${osimage} ${loopdev}
 
 # Reformat STATE partition with btrfs
 mkfs.btrfs -L COS_STATE ${loopdev}p4 -f
