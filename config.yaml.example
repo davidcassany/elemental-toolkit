@@ -71,9 +71,6 @@ install:
     fs: squashfs
     uri: oci:recovery/elemental
 
-  # filesystem label of the passive backup image
-  passive.label: COS_PASSIVE
-
   # extra cloud-init config file URI to include during the installation
   cloud-init: "https://some.cloud-init.org/my-config-file"
 

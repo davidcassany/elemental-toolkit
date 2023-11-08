@@ -170,41 +170,38 @@ func NewRunConfig(opts ...GenericOptions) *v1.RunConfig {
 
 // NewInstallSpec returns an InstallSpec struct all based on defaults and basic host checks (e.g. EFI vs BIOS)
 func NewInstallSpec(cfg v1.Config) *v1.InstallSpec {
-	var recoveryImg, activeImg, passiveImg v1.Image
+	var recoveryImg v1.Image
+	var source *v1.ImageSource
 
 	// Check the default ISO installation media is available
 	isoRootExists, _ := utils.Exists(cfg.Fs, constants.ISOBaseTree)
 
-	activeImg.Label = constants.ActiveLabel
-	activeImg.Size = constants.ImgSize
-	activeImg.File = filepath.Join(constants.StateDir, "cOS", constants.ActiveImgFile)
-	activeImg.FS = constants.LinuxImgFs
-	activeImg.MountPoint = constants.ActiveDir
 	if isoRootExists {
-		activeImg.Source = v1.NewDirSrc(constants.ISOBaseTree)
+		source = v1.NewDirSrc(constants.ISOBaseTree)
 	} else {
-		activeImg.Source = v1.NewEmptySrc()
+		source = v1.NewEmptySrc()
 	}
 
-	recoveryImg.Source = v1.NewFileSrc(activeImg.File)
-	recoveryImg.FS = constants.LinuxImgFs
+	recoveryImg.Source = source
+	recoveryImg.FS = constants.SquashFs
 	recoveryImg.Label = constants.SystemLabel
-	recoveryImg.File = filepath.Join(constants.RecoveryDir, "cOS", constants.RecoveryImgFile)
+	recoveryImg.File = filepath.Join(constants.RecoveryDir, constants.RecoveryImgFile)
 
-	passiveImg = v1.Image{
-		File:   filepath.Join(constants.StateDir, "cOS", constants.PassiveImgFile),
-		Label:  constants.PassiveLabel,
-		Source: v1.NewFileSrc(activeImg.File),
-		FS:     constants.LinuxImgFs,
+	// TODO write constants
+	snapshotCfg := &v1.SnapshotterConfig{
+		Type:     "loopdevice",
+		MaxSnaps: 3,
+		FS:       constants.LinuxImgFs,
+		Size:     constants.ImgSize,
 	}
 
 	return &v1.InstallSpec{
-		Firmware:   v1.EFI,
-		PartTable:  v1.GPT,
-		Partitions: NewInstallElementalPartitions(),
-		Active:     activeImg,
-		Recovery:   recoveryImg,
-		Passive:    passiveImg,
+		Firmware:       v1.EFI,
+		PartTable:      v1.GPT,
+		Partitions:     NewInstallElementalPartitions(),
+		Active:         source,
+		Recovery:       recoveryImg,
+		SnapshotterCfg: snapshotCfg,
 	}
 }
 
