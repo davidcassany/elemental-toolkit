@@ -55,7 +55,7 @@ func addResetFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("docker-image", "d", "", "Install a specified container image")
 	_ = cmd.Flags().MarkDeprecated("docker-image", "'docker-image' is deprecated please use 'system' instead")
 
-	cmd.Flags().String("system.uri", "", "Sets the system image source and its type (e.g. 'docker:registry.org/image:tag')")
+	cmd.Flags().String("system", "", "Sets the system image source and its type (e.g. 'docker:registry.org/image:tag')")
 	cmd.Flags().Bool("verify", false, "Enable mtree checksum verification (requires images manifests generated with mtree separately)")
 	cmd.Flags().Bool("strict", false, "Enable strict check of hooks (They need to exit with 0)")
 

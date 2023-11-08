@@ -25,14 +25,16 @@ import (
 	cnst "github.com/rancher/elemental-toolkit/pkg/constants"
 	"github.com/rancher/elemental-toolkit/pkg/elemental"
 	elementalError "github.com/rancher/elemental-toolkit/pkg/error"
+	"github.com/rancher/elemental-toolkit/pkg/snapshotter"
 	v1 "github.com/rancher/elemental-toolkit/pkg/types/v1"
 	"github.com/rancher/elemental-toolkit/pkg/utils"
 )
 
 type InstallAction struct {
-	cfg        *v1.RunConfig
-	spec       *v1.InstallSpec
-	bootloader v1.Bootloader
+	cfg         *v1.RunConfig
+	spec        *v1.InstallSpec
+	bootloader  v1.Bootloader
+	snapshotter v1.Snapshotter
 }
 
 type InstallActionOption func(i *InstallAction) error
@@ -57,6 +59,10 @@ func NewInstallAction(cfg *v1.RunConfig, spec *v1.InstallSpec, opts ...InstallAc
 
 	if i.bootloader == nil {
 		i.bootloader = bootloader.NewGrub(&cfg.Config, bootloader.WithGrubDisableBootEntry(i.spec.DisableBootEntry))
+	}
+
+	if i.snapshotter == nil {
+		i.snapshotter = snapshotter.NewLoopDeviceSnapshotter(&cfg.Config, spec.SnapshotterCfg)
 	}
 
 	return i
@@ -86,10 +92,10 @@ func (i *InstallAction) createInstallStateYaml(sysMeta, recMeta interface{}) err
 
 	// If recovery image is a copyied file from active reuse the same source and metadata
 	recSource := i.spec.Recovery.Source
-	if i.spec.Recovery.Source.IsFile() && i.spec.Active.File == i.spec.Recovery.Source.Value() {
+	/*if i.spec.Recovery.Source.IsFile() && i.spec.Active.Path == i.spec.Recovery.Source.Value() {
 		recMeta = sysMeta
-		recSource = i.spec.Active.Source
-	}
+		recSource = i.spec.Active
+	}*/
 
 	installState := &v1.InstallState{
 		Date: time.Now().Format(time.RFC3339),
@@ -98,16 +104,10 @@ func (i *InstallAction) createInstallStateYaml(sysMeta, recMeta interface{}) err
 				FSLabel: i.spec.Partitions.State.FilesystemLabel,
 				Images: map[string]*v1.ImageState{
 					cnst.ActiveImgName: {
-						Source:         i.spec.Active.Source,
+						Source:         i.spec.Active,
 						SourceMetadata: sysMeta,
-						Label:          i.spec.Active.Label,
-						FS:             i.spec.Active.FS,
-					},
-					cnst.PassiveImgName: {
-						Source:         i.spec.Active.Source,
-						SourceMetadata: sysMeta,
-						Label:          i.spec.Passive.Label,
-						FS:             i.spec.Passive.FS,
+						//Label:          i.spec.Active.Label,
+						FS: i.spec.SnapshotterCfg.FS,
 					},
 				},
 			},
@@ -149,17 +149,20 @@ func (i *InstallAction) createInstallStateYaml(sysMeta, recMeta interface{}) err
 
 // InstallRun will install the system from a given configuration
 func (i InstallAction) Run() (err error) {
+	var activeSnap *v1.Snapshot
+
 	e := elemental.NewElemental(&i.cfg.Config)
 	cleanup := utils.NewCleanStack()
 	defer func() { err = cleanup.Cleanup(err) }()
 
 	// Set installation sources from a downloaded ISO
 	if i.spec.Iso != "" {
-		isoCleaner, err := e.UpdateSourceFormISO(i.spec.Iso, &i.spec.Active)
+		source, isoCleaner, err := elemental.SourceFormISO(&i.cfg.Config, i.spec.Iso)
 		cleanup.Push(isoCleaner)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.Unknown)
 		}
+		i.spec.Active = source
 	}
 
 	// Partition and format device if needed
@@ -176,18 +179,30 @@ func (i InstallAction) Run() (err error) {
 		return e.UnmountPartitions(i.spec.Partitions.PartitionsByMountPoint(true))
 	})
 
+	err = i.snapshotter.InitSnapshotter(i.spec.Partitions.State.MountPoint)
+	if err != nil {
+		// TODO add init snaphotter error
+		return err
+	}
+
 	// Before install hook happens after partitioning but before the image OS is applied
 	err = i.installHook(cnst.BeforeInstallHook)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.HookBeforeInstall)
 	}
 
+	activeSnap, err = i.snapshotter.StartTransaction()
+	if err != nil {
+		//TODO snapshotter error
+		return err
+	}
+	cleanup.PushErrorOnly(func() error { return i.snapshotter.CloseTransactionOnError(activeSnap) })
+
 	// Deploy active image
-	systemMeta, treeCleaner, err := e.DeployImgTree(&i.spec.Active, cnst.WorkingImgDir)
+	systemMeta, err := e.DumpSource(activeSnap.WorkDir, i.spec.Active)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.DeployImgTree)
 	}
-	cleanup.Push(func() error { return treeCleaner() })
 
 	// Copy cloud-init if any
 	err = e.CopyCloudConfig(i.spec.Partitions.GetConfigStorage(), i.spec.CloudInit)
@@ -196,7 +211,7 @@ func (i InstallAction) Run() (err error) {
 	}
 	// Install grub
 	err = i.bootloader.Install(
-		cnst.WorkingImgDir,
+		activeSnap.WorkDir,
 		i.spec.Partitions.State.MountPoint,
 		i.spec.Partitions.State.FilesystemLabel,
 	)
@@ -239,14 +254,14 @@ func (i InstallAction) Run() (err error) {
 		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
 	}
 
-	err = e.CreateImgFromTree(cnst.WorkingImgDir, &i.spec.Active, false, treeCleaner)
+	err = i.snapshotter.CloseTransaction(activeSnap)
 	if err != nil {
-		return elementalError.NewFromError(err, elementalError.CreateImgFromTree)
+		return err
 	}
 
 	// Install Recovery
 	var recoveryMeta interface{}
-	if i.spec.Recovery.Source.IsFile() && i.spec.Active.File == i.spec.Recovery.Source.Value() && i.spec.Active.FS == i.spec.Recovery.FS {
+	if i.spec.Recovery.Source.IsFile() && activeSnap.Path == i.spec.Recovery.Source.Value() && i.spec.SnapshotterCfg.FS == i.spec.Recovery.FS {
 		// Reuse image file from active image
 		err := e.CopyFileImg(&i.spec.Recovery)
 		if err != nil {
@@ -257,12 +272,6 @@ func (i InstallAction) Run() (err error) {
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.DeployImage)
 		}
-	}
-
-	// Install Passive
-	err = e.CopyFileImg(&i.spec.Passive)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.DeployImage)
 	}
 
 	err = i.installHook(cnst.PostInstallHook)
@@ -311,8 +320,7 @@ func (i *InstallAction) applySelinuxLabels(e *elemental.Elemental) error {
 func (i *InstallAction) prepareDevice(e *elemental.Elemental) error {
 	if i.spec.NoFormat {
 		// Check force flag against current device
-		labels := []string{i.spec.Active.Label, i.spec.Recovery.Label}
-		if e.CheckActiveDeployment(labels) && !i.spec.Force {
+		if e.CheckActiveDeployment() && !i.spec.Force {
 			return elementalError.New("use `force` flag to run an installation over the current running deployment", elementalError.AlreadyInstalled)
 		}
 	} else {

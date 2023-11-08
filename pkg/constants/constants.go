@@ -100,6 +100,11 @@ const (
 	OverlayDir         = "/run/elemental/overlay"
 	RunningStateDir    = "/run/initramfs/elemental-state" // TODO: converge this constant with StateDir/RecoveryDir when moving to elemental-rootfs as default rootfs feature.
 
+	// Running mode sentinel files
+	ActiveMode   = "/run/cos/active_mode"
+	PassiveMode  = "/run/cos/passive_mode"
+	RecoveryMode = "/run/cos/recovery_mode"
+
 	// Live image mountpoints
 	ISOBaseTree = "/run/rootfsbase"
 	LiveDir     = "/run/initramfs/live"
