@@ -21,14 +21,14 @@ type Snapshotter interface {
 	StartTransaction() (*Snapshot, error)
 	CloseTransaction(snap *Snapshot) error
 	CloseTransactionOnError(snap *Snapshot) error
+	DeleteSnapshot(id int) error
 }
 
 type SnapshotterConfig struct {
 	Type     string
-	MaxSnaps int `yaml:"max-snaps,omitempty" mapstructure:"max-snaps"`
-	//Label    string `yaml:"label,omitempty" mapstructure:"label"`
-	Size uint   `yaml:"size,omitempty" mapstructure:"size"`
-	FS   string `yaml:"fs,omitempty" mapstructure:"fs"`
+	MaxSnaps int    `yaml:"max-snaps,omitempty" mapstructure:"max-snaps"`
+	Size     uint   `yaml:"size,omitempty" mapstructure:"size"`
+	FS       string `yaml:"fs,omitempty" mapstructure:"fs"`
 }
 
 type Snapshot struct {

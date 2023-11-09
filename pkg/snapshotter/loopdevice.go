@@ -17,10 +17,13 @@ limitations under the License.
 package snapshotter
 
 import (
+	"bufio"
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/rancher/elemental-toolkit/pkg/constants"
 	"github.com/rancher/elemental-toolkit/pkg/elemental"
@@ -164,10 +167,25 @@ func (l *LoopDevice) CloseTransaction(snap *v1.Snapshot) (err error) {
 		_ = l.cfg.Fs.Rename(activeImgBak, activeImg)
 		return err
 	}
+	// From now on we do not error out as the transaction is already done, cleanup steps are only logged
 	_ = l.cfg.Fs.Remove(activeImgBak)
+	_ = l.cleanOldSnaps()
 
 	snap.InProgress = false
 	return err
+}
+
+func (l *LoopDevice) DeleteSnapshot(id int) error {
+	inUse, err := l.isSnapInUse(id)
+	if err != nil {
+		return err
+	}
+
+	if inUse {
+		return fmt.Errorf("cannot delete a snapshot that is currently in use")
+	}
+
+	return l.cfg.Fs.RemoveAll(filepath.Join(l.rootDir, loopDeviceSnapsPath, strconv.Itoa(id)))
 }
 
 func (l *LoopDevice) snapshotToImage(snap *v1.Snapshot) *v1.Image {
@@ -180,30 +198,96 @@ func (l *LoopDevice) snapshotToImage(snap *v1.Snapshot) *v1.Image {
 	}
 }
 
+func (l *LoopDevice) cleanOldSnaps() error {
+	ids, err := l.getSnaps()
+	if err != nil {
+		l.cfg.Logger.Warnf("could not get current snapshots")
+		return err
+	}
+
+	sort.Ints(ids)
+	for len(ids) > l.snapCfg.MaxSnaps {
+		err = l.DeleteSnapshot(ids[0])
+		if err != nil {
+			l.cfg.Logger.Warnf("could not delete snapshot %d", ids[0])
+			return err
+		}
+		ids = ids[1:]
+	}
+	return nil
+}
+
 func (l *LoopDevice) getNextSnapID() (int, error) {
-	var snapID, max int64
+	var id int
+
+	ids, err := l.getSnaps()
+	if err != nil {
+		return -1, err
+	}
+	for _, i := range ids {
+		if i > id {
+			id = i
+		}
+	}
+	return id + 1, nil
+}
+
+func (l *LoopDevice) isSnapInUse(id int) (bool, error) {
+	backedFiles, err := l.cfg.Runner.Run("losetup", "-ln", "--output", "BACK-FILE")
+	if err != nil {
+		return false, err
+	}
+
+	scanner := bufio.NewScanner(strings.NewReader(strings.TrimSpace(string(backedFiles))))
+	for scanner.Scan() {
+		backedFile := scanner.Text()
+		suffix := filepath.Join(loopDeviceSnapsPath, strconv.Itoa(id), loopDeviceImgName)
+		if strings.HasSuffix(backedFile, suffix) {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
+func (l *LoopDevice) getCurrentSnap() (int, error) {
+
+	ids, err := l.getSnaps()
+	if err != nil {
+		return -1, err
+	}
+
+	for _, id := range ids {
+		if inUse, _ := l.isSnapInUse(id); inUse {
+			return id, nil
+		}
+	}
+	return 0, nil
+}
+
+func (l *LoopDevice) getSnaps() ([]int, error) {
+	var ids []int
 
 	snapsPath := filepath.Join(l.rootDir, loopDeviceSnapsPath)
 	r := regexp.MustCompile(`\d`)
 	if ok, _ := utils.Exists(l.cfg.Fs, snapsPath); ok {
 		dirs, err := l.cfg.Fs.ReadDir(snapsPath)
 		if err != nil {
-			return -1, err
+			l.cfg.Logger.Errorf("failed reading %s contents", snapsPath)
+			return ids, err
 		}
 		for _, d := range dirs {
-			// Find next snapshot ID based on directory names
+			// Find snapshots based numeric directory names
 			if !d.IsDir() || !r.MatchString(d.Name()) {
 				continue
 			}
-			snapID, err = strconv.ParseInt(d.Name(), 10, 32)
+			id, err := strconv.ParseInt(d.Name(), 10, 32)
 			if err != nil {
 				continue
 			}
-			if snapID > max {
-				max = snapID
-			}
+			ids = append(ids, int(id))
 		}
-		return int(max + 1), nil
+		return ids, nil
 	}
-	return -1, fmt.Errorf("cannot determine next snapshot ID, initate snapshotter first")
+	l.cfg.Logger.Errorf("path %s does not exist", snapsPath)
+	return ids, fmt.Errorf("cannot determine current snapshots, initate snapshotter first")
 }

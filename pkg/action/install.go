@@ -204,58 +204,15 @@ func (i InstallAction) Run() (err error) {
 		return elementalError.NewFromError(err, elementalError.DeployImgTree)
 	}
 
-	// Copy cloud-init if any
-	err = e.CopyCloudConfig(i.spec.Partitions.GetConfigStorage(), i.spec.CloudInit)
+	err = i.refineDeployment(activeSnap.WorkDir)
 	if err != nil {
-		return elementalError.NewFromError(err, elementalError.CopyFile)
-	}
-	// Install grub
-	err = i.bootloader.Install(
-		activeSnap.WorkDir,
-		i.spec.Partitions.State.MountPoint,
-		i.spec.Partitions.State.FilesystemLabel,
-	)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.InstallGrub)
-	}
-
-	// Relabel SELinux
-	err = i.applySelinuxLabels(e)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
-	}
-
-	err = i.installChrootHook(cnst.AfterInstallChrootHook, cnst.WorkingImgDir)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.HookAfterInstallChroot)
-	}
-	err = i.installHook(cnst.AfterInstallHook)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.HookAfterInstall)
-	}
-
-	grubVars := i.spec.GetGrubLabels()
-	err = i.bootloader.SetPersistentVariables(
-		filepath.Join(i.spec.Partitions.State.MountPoint, cnst.GrubOEMEnv),
-		grubVars,
-	)
-	if err != nil {
-		i.cfg.Logger.Error("Error setting GRUB labels: %s", err)
-		return elementalError.NewFromError(err, elementalError.SetGrubVariables)
-	}
-
-	// Installation rebrand (only grub for now)
-	err = i.bootloader.SetDefaultEntry(
-		i.spec.Partitions.State.MountPoint,
-		cnst.WorkingImgDir,
-		i.spec.GrubDefEntry,
-	)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
+		i.cfg.Logger.Errorf("failed refining dumped OS tree: %v", err)
+		return err
 	}
 
 	err = i.snapshotter.CloseTransaction(activeSnap)
 	if err != nil {
+		i.cfg.Logger.Errorf("failed closing snapshot transaction: %v", err)
 		return err
 	}
 
@@ -303,18 +260,62 @@ func (i InstallAction) Run() (err error) {
 	return PowerAction(i.cfg)
 }
 
-// applySelinuxLabels sets SELinux extended attributes to the root-tree being installed
-func (i *InstallAction) applySelinuxLabels(e *elemental.Elemental) error {
-	binds := map[string]string{}
-	if mnt, _ := utils.IsMounted(&i.cfg.Config, i.spec.Partitions.Persistent); mnt {
-		binds[i.spec.Partitions.Persistent.MountPoint] = cnst.UsrLocalPath
+func (i *InstallAction) refineDeployment(workDir string) error {
+	// Copy cloud-init if any
+	err := elemental.CopyCloudConfig(&i.cfg.Config, i.spec.Partitions.GetConfigStorage(), i.spec.CloudInit)
+	if err != nil {
+		return elementalError.NewFromError(err, elementalError.CopyFile)
 	}
-	if mnt, _ := utils.IsMounted(&i.cfg.Config, i.spec.Partitions.OEM); mnt {
-		binds[i.spec.Partitions.OEM.MountPoint] = cnst.OEMPath
-	}
-	return utils.ChrootedCallback(
-		&i.cfg.Config, cnst.WorkingImgDir, binds, func() error { return e.SelinuxRelabel("/", true) },
+	// Install grub
+	err = i.bootloader.Install(
+		workDir,
+		i.spec.Partitions.State.MountPoint,
+		i.spec.Partitions.State.FilesystemLabel,
 	)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed installing grub: %v", err)
+		return elementalError.NewFromError(err, elementalError.InstallGrub)
+	}
+
+	// Relabel SELinux
+	err = applySelinuxLabels(&i.cfg.Config, i.spec.Partitions)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed setting SELinux labels: %v", err)
+		return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
+	}
+
+	err = i.installChrootHook(cnst.AfterInstallChrootHook, cnst.WorkingImgDir)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed after-install-chroot hook: %v", err)
+		return elementalError.NewFromError(err, elementalError.HookAfterInstallChroot)
+	}
+	err = i.installHook(cnst.AfterInstallHook)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed after-install hook: %v", err)
+		return elementalError.NewFromError(err, elementalError.HookAfterInstall)
+	}
+
+	grubVars := i.spec.GetGrubLabels()
+	err = i.bootloader.SetPersistentVariables(
+		filepath.Join(i.spec.Partitions.State.MountPoint, cnst.GrubOEMEnv),
+		grubVars,
+	)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed setting GRUB labels: %v", err)
+		return elementalError.NewFromError(err, elementalError.SetGrubVariables)
+	}
+
+	// Installation rebrand (only grub for now)
+	err = i.bootloader.SetDefaultEntry(
+		i.spec.Partitions.State.MountPoint,
+		cnst.WorkingImgDir,
+		i.spec.GrubDefEntry,
+	)
+	if err != nil {
+		i.cfg.Logger.Errorf("failed setting defaut GRUB entry: %v", err)
+		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
+	}
+	return nil
 }
 
 func (i *InstallAction) prepareDevice(e *elemental.Elemental) error {
