@@ -162,8 +162,6 @@ func (u *UpgradeAction) Run() (err error) {
 		err = cleanup.Cleanup(err)
 	}()
 
-	e := elemental.NewElemental(&u.config.Config)
-
 	upgradeImg = u.spec.Recovery
 	finalImageFile = filepath.Join(u.spec.Partitions.Recovery.MountPoint, constants.RecoveryImgFile)
 
@@ -197,7 +195,7 @@ func (u *UpgradeAction) Run() (err error) {
 		cleanup.PushErrorOnly(func() error { return u.snapshotter.CloseTransactionOnError(activeSnap) })
 
 		// Deploy active image
-		upgradeMeta, err = e.DumpSource(activeSnap.WorkDir, u.spec.Active)
+		upgradeMeta, err = elemental.DumpSource(&u.config.Config, activeSnap.WorkDir, u.spec.Active)
 		if err != nil {
 			u.Error("failed extracting %s image: %v", u.spec.Active.String(), err)
 			return elementalError.NewFromError(err, elementalError.DeployImgTree)
@@ -205,7 +203,7 @@ func (u *UpgradeAction) Run() (err error) {
 	} else {
 		// Deploy recovery image
 		u.Info("deploying image %s to %s", upgradeImg.Source.Value(), upgradeImg.File)
-		upgradeMeta, treeCleaner, err = e.DeployImgTree(&upgradeImg, constants.WorkingImgDir)
+		upgradeMeta, treeCleaner, err = elemental.DeployImgTree(&u.config.Config, &upgradeImg, constants.WorkingImgDir)
 		if err != nil {
 			u.Error("Failed deploying image to file '%s': %s", upgradeImg.File, err)
 			return elementalError.NewFromError(err, elementalError.DeployImgTree)
@@ -226,7 +224,7 @@ func (u *UpgradeAction) Run() (err error) {
 			return err
 		}
 	} else {
-		err = e.CreateImgFromTree(constants.WorkingImgDir, &upgradeImg, false, treeCleaner)
+		err = elemental.CreateImgFromTree(&u.config.Config, constants.WorkingImgDir, &upgradeImg, false, treeCleaner)
 		if err != nil {
 			u.Error("failed creating transition image")
 			return elementalError.NewFromError(err, elementalError.CreateImgFromTree)

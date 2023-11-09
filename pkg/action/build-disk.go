@@ -124,8 +124,6 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 	workdir := filepath.Join(b.cfg.OutDir, constants.DiskWorkDir)
 	cleanup.Push(func() error { return b.cfg.Fs.RemoveAll(workdir) })
 
-	e := elemental.NewElemental(&b.cfg.Config)
-
 	// Set output image file
 	if b.cfg.Date {
 		currTime := time.Now()
@@ -153,7 +151,7 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 	activeRoot := recRoot
 
 	// Create recovery root
-	recInfo, err = e.DumpSource(recRoot, b.spec.Recovery.Source)
+	recInfo, err = elemental.DumpSource(&b.cfg.Config, recRoot, b.spec.Recovery.Source)
 	if err != nil {
 		b.cfg.Logger.Errorf("failed loading recovery image source tree: %s", err.Error())
 		return err
@@ -165,7 +163,7 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 		if !b.spec.Active.Source.IsEmpty() {
 			// Create active root
 			activeRoot = filepath.Join(workdir, filepath.Base(b.spec.Active.File)+rootSuffix)
-			activeInfo, err = e.DumpSource(activeRoot, b.spec.Active.Source)
+			activeInfo, err = elemental.DumpSource(&b.cfg.Config, activeRoot, b.spec.Active.Source)
 			if err != nil {
 				b.cfg.Logger.Errorf("failed loading active image source tree: %s", err.Error())
 				return err
@@ -225,7 +223,7 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 	}
 
 	// Relabel SELinux
-	err = b.applySelinuxLabels(e, activeRoot, b.spec.Unprivileged)
+	err = b.applySelinuxLabels(activeRoot, b.spec.Unprivileged)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
 	}
@@ -245,14 +243,14 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 	// Create OS images
 	if !b.spec.Expandable {
 		// Create active image
-		err = e.CreateImgFromTree(activeRoot, &b.spec.Active, b.spec.Unprivileged, nil)
+		err = elemental.CreateImgFromTree(&b.cfg.Config, activeRoot, &b.spec.Active, b.spec.Unprivileged, nil)
 		if err != nil {
 			b.cfg.Logger.Errorf("failed creating active image from root-tree: %s", err.Error())
 			return err
 		}
 
 		// Create passive image
-		err = e.CreateImgFromTree(activeRoot, &b.spec.Passive, b.spec.Unprivileged, nil)
+		err = elemental.CreateImgFromTree(&b.cfg.Config, activeRoot, &b.spec.Passive, b.spec.Unprivileged, nil)
 		if err != nil {
 			b.cfg.Logger.Errorf("failed creating passive image from root-tree: %s", err.Error())
 			return err
@@ -260,7 +258,8 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 	}
 
 	// Create recovery image and removes recovery and active roots when done
-	err = e.CreateImgFromTree(
+	err = elemental.CreateImgFromTree(
+		&b.cfg.Config,
 		recRoot, &b.spec.Recovery, b.spec.Unprivileged,
 		func() error {
 			cErr := b.cfg.Fs.RemoveAll(recRoot)
@@ -295,7 +294,7 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 	}
 
 	// Creates RAW disk image
-	err = b.CreateRAWDisk(e, rawImg)
+	err = b.CreateRAWDisk(rawImg)
 	if err != nil {
 		b.cfg.Logger.Errorf("failed creating RAW disk: %s", err.Error())
 		return err
@@ -331,9 +330,9 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 }
 
 // CreateRAWDisk creates the RAW disk image file including all required partitions
-func (b *BuildDiskAction) CreateRAWDisk(e *elemental.Elemental, rawImg string) error {
+func (b *BuildDiskAction) CreateRAWDisk(rawImg string) error {
 	// Creates all partition image files
-	images, err := b.CreatePartitionImages(e)
+	images, err := b.CreatePartitionImages()
 	if err != nil {
 		b.cfg.Logger.Errorf("failed creating partition images: %s", err.Error())
 		return err
@@ -365,7 +364,7 @@ func (b *BuildDiskAction) CreateRAWDisk(e *elemental.Elemental, rawImg string) e
 }
 
 // CreatePartitionImage creates partition image files and returns a slice of the created images
-func (b *BuildDiskAction) CreatePartitionImages(e *elemental.Elemental) ([]*v1.Image, error) {
+func (b *BuildDiskAction) CreatePartitionImages() ([]*v1.Image, error) {
 	var err error
 	var img *v1.Image
 	var images []*v1.Image
@@ -378,7 +377,7 @@ func (b *BuildDiskAction) CreatePartitionImages(e *elemental.Elemental) ([]*v1.I
 
 	b.cfg.Logger.Infof("Creating EFI partition image")
 	img = b.spec.Partitions.EFI.ToImage()
-	err = e.CreateFileSystemImage(img)
+	err = elemental.CreateSimpleFileSystemImage(&b.cfg.Config, img)
 	if err != nil {
 		b.cfg.Logger.Errorf("failed creating EFI image: %s", err.Error())
 		return nil, err
@@ -415,8 +414,8 @@ func (b *BuildDiskAction) CreatePartitionImages(e *elemental.Elemental) ([]*v1.I
 	for _, part := range b.spec.Partitions.PartitionsByInstallOrder(v1.PartitionList{}, excludes...) {
 		b.cfg.Logger.Infof("Creating %s partition image", part.Name)
 		img = part.ToImage()
-		err = e.CreateImgFromTree(
-			b.roots[part.Name], img, b.spec.Unprivileged,
+		err = elemental.CreateImgFromTree(
+			&b.cfg.Config, b.roots[part.Name], img, b.spec.Unprivileged,
 			func() error { return b.cfg.Fs.RemoveAll(b.roots[part.Name]) },
 		)
 		if err != nil {
@@ -639,7 +638,7 @@ func (b *BuildDiskAction) CreateDiskPartitionTable(disk string) error {
 }
 
 // applySelinuxLabels sets SELinux extended attributes to the root-tree being installed. Swallows errors, label on a best effort
-func (b *BuildDiskAction) applySelinuxLabels(e *elemental.Elemental, root string, unprivileged bool) error {
+func (b *BuildDiskAction) applySelinuxLabels(root string, unprivileged bool) error {
 	if unprivileged {
 		// Swallow errors, label on a best effort when not chrooting
 		return elemental.SelinuxRelabel(&b.cfg.Config, root, false)

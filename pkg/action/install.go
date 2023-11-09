@@ -151,7 +151,6 @@ func (i *InstallAction) createInstallStateYaml(sysMeta, recMeta interface{}) err
 func (i InstallAction) Run() (err error) {
 	var activeSnap *v1.Snapshot
 
-	e := elemental.NewElemental(&i.cfg.Config)
 	cleanup := utils.NewCleanStack()
 	defer func() { err = cleanup.Cleanup(err) }()
 
@@ -166,17 +165,17 @@ func (i InstallAction) Run() (err error) {
 	}
 
 	// Partition and format device if needed
-	err = i.prepareDevice(e)
+	err = i.prepareDevice()
 	if err != nil {
 		return err
 	}
 
-	err = e.MountPartitions(i.spec.Partitions.PartitionsByMountPoint(false))
+	err = elemental.MountPartitions(&i.cfg.Config, i.spec.Partitions.PartitionsByMountPoint(false))
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.MountPartitions)
 	}
 	cleanup.Push(func() error {
-		return e.UnmountPartitions(i.spec.Partitions.PartitionsByMountPoint(true))
+		return elemental.UnmountPartitions(&i.cfg.Config, i.spec.Partitions.PartitionsByMountPoint(true))
 	})
 
 	err = i.snapshotter.InitSnapshotter(i.spec.Partitions.State.MountPoint)
@@ -199,7 +198,7 @@ func (i InstallAction) Run() (err error) {
 	cleanup.PushErrorOnly(func() error { return i.snapshotter.CloseTransactionOnError(activeSnap) })
 
 	// Deploy active image
-	systemMeta, err := e.DumpSource(activeSnap.WorkDir, i.spec.Active)
+	systemMeta, err := elemental.DumpSource(&i.cfg.Config, activeSnap.WorkDir, i.spec.Active)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.DeployImgTree)
 	}
@@ -220,12 +219,12 @@ func (i InstallAction) Run() (err error) {
 	var recoveryMeta interface{}
 	if i.spec.Recovery.Source.IsFile() && activeSnap.Path == i.spec.Recovery.Source.Value() && i.spec.SnapshotterCfg.FS == i.spec.Recovery.FS {
 		// Reuse image file from active image
-		err := e.CopyFileImg(&i.spec.Recovery)
+		err := elemental.CopyFileImg(&i.cfg.Config, &i.spec.Recovery)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.CopyFileImg)
 		}
 	} else {
-		recoveryMeta, err = e.DeployImage(&i.spec.Recovery)
+		recoveryMeta, err = elemental.DeployImage(&i.cfg.Config, &i.spec.Recovery)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.DeployImage)
 		}
@@ -318,20 +317,17 @@ func (i *InstallAction) refineDeployment(workDir string) error {
 	return nil
 }
 
-func (i *InstallAction) prepareDevice(e *elemental.Elemental) error {
+func (i *InstallAction) prepareDevice() error {
 	if i.spec.NoFormat {
 		// Check force flag against current device
-		if e.CheckActiveDeployment() && !i.spec.Force {
+		if elemental.CheckActiveDeployment(&i.cfg.Config) && !i.spec.Force {
 			return elementalError.New("use `force` flag to run an installation over the current running deployment", elementalError.AlreadyInstalled)
 		}
 	} else {
 		// Deactivate any active volume on target
-		err := e.DeactivateDevices()
-		if err != nil {
-			return elementalError.NewFromError(err, elementalError.DeactivatingDevices)
-		}
+		elemental.DeactivateDevices(&i.cfg.Config)
 		// Partition device
-		err = e.PartitionAndFormatDevice(i.spec)
+		err := elemental.PartitionAndFormatDevice(&i.cfg.Config, i.spec)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.PartitioningDevice)
 		}
