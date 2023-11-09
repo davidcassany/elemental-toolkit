@@ -88,7 +88,7 @@ func NewResetAction(cfg *v1.RunConfig, spec *v1.ResetSpec, opts ...ResetActionOp
 	return r
 }
 
-func (r *ResetAction) updateInstallState(e *elemental.Elemental, cleanup *utils.CleanStack, meta interface{}) error {
+func (r *ResetAction) updateInstallState(cleanup *utils.CleanStack, meta interface{}) error {
 	if r.spec.Partitions.Recovery == nil || r.spec.Partitions.State == nil {
 		return fmt.Errorf("undefined state or recovery partition")
 	}
@@ -139,18 +139,17 @@ func (r *ResetAction) updateInstallState(e *elemental.Elemental, cleanup *utils.
 func (r ResetAction) Run() (err error) {
 	var activeSnap *v1.Snapshot
 
-	e := elemental.NewElemental(&r.cfg.Config)
 	cleanup := utils.NewCleanStack()
 	defer func() { err = cleanup.Cleanup(err) }()
 
 	// Unmount partitions if any is already mounted before formatting
-	err = e.UnmountPartitions(r.spec.Partitions.PartitionsByMountPoint(true, r.spec.Partitions.Recovery))
+	err = elemental.UnmountPartitions(&r.cfg.Config, r.spec.Partitions.PartitionsByMountPoint(true, r.spec.Partitions.Recovery))
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.UnmountPartitions)
 	}
 
 	// Reformat state partition
-	err = e.FormatPartition(r.spec.Partitions.State)
+	err = elemental.FormatPartition(&r.cfg.Config, r.spec.Partitions.State)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.FormatPartitions)
 	}
@@ -159,7 +158,7 @@ func (r ResetAction) Run() (err error) {
 	if r.spec.FormatPersistent {
 		persistent := r.spec.Partitions.Persistent
 		if persistent != nil {
-			err = e.FormatPartition(persistent)
+			err = elemental.FormatPartition(&r.cfg.Config, persistent)
 			if err != nil {
 				return elementalError.NewFromError(err, elementalError.FormatPartitions)
 			}
@@ -170,19 +169,19 @@ func (r ResetAction) Run() (err error) {
 	if r.spec.FormatOEM {
 		oem := r.spec.Partitions.OEM
 		if oem != nil {
-			err = e.FormatPartition(oem)
+			err = elemental.FormatPartition(&r.cfg.Config, oem)
 			if err != nil {
 				return elementalError.NewFromError(err, elementalError.FormatPartitions)
 			}
 		}
 	}
 	// Mount configured partitions
-	err = e.MountPartitions(r.spec.Partitions.PartitionsByMountPoint(false, r.spec.Partitions.Recovery))
+	err = elemental.MountPartitions(&r.cfg.Config, r.spec.Partitions.PartitionsByMountPoint(false, r.spec.Partitions.Recovery))
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.MountPartitions)
 	}
 	cleanup.Push(func() error {
-		return e.UnmountPartitions(r.spec.Partitions.PartitionsByMountPoint(true, r.spec.Partitions.Recovery))
+		return elemental.UnmountPartitions(&r.cfg.Config, r.spec.Partitions.PartitionsByMountPoint(true, r.spec.Partitions.Recovery))
 	})
 
 	err = r.snapshotter.InitSnapshotter(r.spec.Partitions.State.MountPoint)
@@ -204,7 +203,7 @@ func (r ResetAction) Run() (err error) {
 	cleanup.PushErrorOnly(func() error { return r.snapshotter.CloseTransactionOnError(activeSnap) })
 
 	// Deploy active image
-	meta, err := e.DumpSource(activeSnap.WorkDir, r.spec.Active)
+	meta, err := elemental.DumpSource(&r.cfg.Config, activeSnap.WorkDir, r.spec.Active)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.DeployImgTree)
 	}
@@ -226,7 +225,7 @@ func (r ResetAction) Run() (err error) {
 		return elementalError.NewFromError(err, elementalError.HookPostReset)
 	}
 
-	err = r.updateInstallState(e, cleanup, meta)
+	err = r.updateInstallState(cleanup, meta)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.CreateFile)
 	}
