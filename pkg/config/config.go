@@ -293,15 +293,17 @@ func getActivePassiveAndRecoveryState(state *v1.InstallState) (active, passive, 
 
 // NewUpgradeSpec returns an UpgradeSpec struct all based on defaults and current host state
 func NewUpgradeSpec(cfg v1.Config) (*v1.UpgradeSpec, error) {
-	var aState, pState, rState *v1.ImageState
-	var active, passive, recovery v1.Image
+	var rState *v1.ImageState
+	var recovery v1.Image
+	var active *v1.ImageSource
 
 	installState, err := cfg.LoadInstallState()
 	if err != nil {
 		cfg.Logger.Warnf("failed reading installation state: %s", err.Error())
 	}
 
-	aState, pState, rState = getActivePassiveAndRecoveryState(installState)
+	// TODO this method requires a rewrite
+	_, _, rState = getActivePassiveAndRecoveryState(installState)
 
 	parts, err := utils.GetAllPartitions()
 	if err != nil {
@@ -315,7 +317,7 @@ func NewUpgradeSpec(cfg v1.Config) (*v1.UpgradeSpec, error) {
 		}
 
 		recovery = v1.Image{
-			File:       filepath.Join(ep.Recovery.MountPoint, "cOS", constants.TransitionImgFile),
+			File:       filepath.Join(ep.Recovery.MountPoint, constants.TransitionImgFile),
 			Size:       constants.ImgSize,
 			Label:      rState.Label,
 			FS:         rState.FS,
@@ -329,21 +331,7 @@ func NewUpgradeSpec(cfg v1.Config) (*v1.UpgradeSpec, error) {
 			ep.State.MountPoint = constants.StateDir
 		}
 
-		active = v1.Image{
-			File:       filepath.Join(ep.State.MountPoint, "cOS", constants.TransitionImgFile),
-			Size:       constants.ImgSize,
-			Label:      aState.Label,
-			FS:         aState.FS,
-			MountPoint: constants.TransitionDir,
-			Source:     v1.NewEmptySrc(),
-		}
-
-		passive = v1.Image{
-			File:   filepath.Join(ep.State.MountPoint, "cOS", constants.PassiveImgFile),
-			Label:  pState.Label,
-			Source: v1.NewFileSrc(active.File),
-			FS:     active.FS,
-		}
+		active = v1.NewEmptySrc()
 	}
 
 	// This is needed if we want to use the persistent as tmpdir for the upgrade images
@@ -355,19 +343,25 @@ func NewUpgradeSpec(cfg v1.Config) (*v1.UpgradeSpec, error) {
 		}
 	}
 
+	snapshotCfg := &v1.SnapshotterConfig{
+		Type:     "loopdevice",
+		MaxSnaps: 3,
+		FS:       constants.LinuxImgFs,
+		Size:     constants.ImgSize,
+	}
+
 	return &v1.UpgradeSpec{
-		Active:     active,
-		Recovery:   recovery,
-		Passive:    passive,
-		Partitions: ep,
-		State:      installState,
+		Active:         active,
+		Recovery:       recovery,
+		Partitions:     ep,
+		State:          installState,
+		SnapshotterCfg: snapshotCfg,
 	}, nil
 }
 
 // NewResetSpec returns a ResetSpec struct all based on defaults and current host state
 func NewResetSpec(cfg v1.Config) (*v1.ResetSpec, error) {
 	var imgSource *v1.ImageSource
-	var aState, pState *v1.ImageState
 
 	if !utils.BootedFrom(cfg.Runner, constants.RecoveryImgFile) {
 		return nil, fmt.Errorf("reset can only be called from the recovery system")
@@ -379,7 +373,6 @@ func NewResetSpec(cfg v1.Config) (*v1.ResetSpec, error) {
 	if err != nil {
 		cfg.Logger.Warnf("failed reading installation state: %s", err.Error())
 	}
-	aState, pState, _ = getActivePassiveAndRecoveryState(installState)
 
 	parts, err := utils.GetAllPartitions()
 	if err != nil {
@@ -434,7 +427,7 @@ func NewResetSpec(cfg v1.Config) (*v1.ResetSpec, error) {
 		cfg.Logger.Warnf("no Persistent partition found")
 	}
 
-	recoveryImg := filepath.Join(constants.RunningStateDir, "cOS", constants.RecoveryImgFile)
+	recoveryImg := filepath.Join(constants.RunningStateDir, constants.RecoveryImgFile)
 
 	if exists, _ := utils.Exists(cfg.Fs, recoveryImg); exists {
 		imgSource = v1.NewFileSrc(recoveryImg)
@@ -442,27 +435,21 @@ func NewResetSpec(cfg v1.Config) (*v1.ResetSpec, error) {
 		imgSource = v1.NewEmptySrc()
 	}
 
-	activeFile := filepath.Join(ep.State.MountPoint, "cOS", constants.ActiveImgFile)
+	snapshotCfg := &v1.SnapshotterConfig{
+		Type:     "loopdevice",
+		MaxSnaps: 3,
+		FS:       constants.LinuxImgFs,
+		Size:     constants.ImgSize,
+	}
+
 	return &v1.ResetSpec{
-		Target:       target,
-		Partitions:   ep,
-		Efi:          efiExists,
-		GrubDefEntry: constants.GrubDefEntry,
-		Active: v1.Image{
-			Label:      aState.Label,
-			Size:       constants.ImgSize,
-			File:       activeFile,
-			FS:         aState.FS,
-			Source:     imgSource,
-			MountPoint: constants.ActiveDir,
-		},
-		Passive: v1.Image{
-			File:   filepath.Join(ep.State.MountPoint, "cOS", constants.PassiveImgFile),
-			Label:  pState.Label,
-			Source: v1.NewFileSrc(activeFile),
-			FS:     aState.FS,
-		},
-		State: installState,
+		Target:         target,
+		Partitions:     ep,
+		Efi:            efiExists,
+		GrubDefEntry:   constants.GrubDefEntry,
+		Active:         imgSource,
+		State:          installState,
+		SnapshotterCfg: snapshotCfg,
 	}, nil
 }
 

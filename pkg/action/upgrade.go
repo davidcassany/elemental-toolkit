@@ -25,15 +25,17 @@ import (
 	"github.com/rancher/elemental-toolkit/pkg/constants"
 	"github.com/rancher/elemental-toolkit/pkg/elemental"
 	elementalError "github.com/rancher/elemental-toolkit/pkg/error"
+	"github.com/rancher/elemental-toolkit/pkg/snapshotter"
 	v1 "github.com/rancher/elemental-toolkit/pkg/types/v1"
 	"github.com/rancher/elemental-toolkit/pkg/utils"
 )
 
 // UpgradeAction represents the struct that will run the upgrade from start to finish
 type UpgradeAction struct {
-	config     *v1.RunConfig
-	spec       *v1.UpgradeSpec
-	bootloader v1.Bootloader
+	config      *v1.RunConfig
+	spec        *v1.UpgradeSpec
+	bootloader  v1.Bootloader
+	snapshotter v1.Snapshotter
 }
 
 type UpgradeActionOption func(r *UpgradeAction) error
@@ -58,6 +60,10 @@ func NewUpgradeAction(config *v1.RunConfig, spec *v1.UpgradeSpec, opts ...Upgrad
 
 	if u.bootloader == nil {
 		u.bootloader = bootloader.NewGrub(&config.Config)
+	}
+
+	if u.snapshotter == nil {
+		u.snapshotter = snapshotter.NewLoopDeviceSnapshotter(&config.Config, spec.SnapshotterCfg)
 	}
 
 	return u
@@ -134,17 +140,6 @@ func (u *UpgradeAction) upgradeInstallStateYaml(meta interface{}, img v1.Image) 
 			}
 			u.spec.State.Partitions[constants.StatePartName] = statePart
 		}
-		if statePart.Images[constants.PassiveImgName] == nil {
-			statePart.Images[constants.PassiveImgName] = &v1.ImageState{
-				Label: u.spec.Passive.Label,
-			}
-		}
-		if statePart.Images[constants.ActiveImgName] != nil {
-			// Do not copy the label from the old active image
-			statePart.Images[constants.PassiveImgName].Source = statePart.Images[constants.ActiveImgName].Source
-			statePart.Images[constants.PassiveImgName].SourceMetadata = statePart.Images[constants.ActiveImgName].SourceMetadata
-			statePart.Images[constants.PassiveImgName].FS = statePart.Images[constants.ActiveImgName].FS
-		}
 		statePart.Images[constants.ActiveImgName] = imgState
 	}
 
@@ -156,8 +151,11 @@ func (u *UpgradeAction) upgradeInstallStateYaml(meta interface{}, img v1.Image) 
 }
 
 func (u *UpgradeAction) Run() (err error) {
+	var activeSnap *v1.Snapshot
 	var upgradeImg v1.Image
 	var finalImageFile string
+	var treeCleaner func() error
+	var upgradeMeta interface{}
 
 	cleanup := utils.NewCleanStack()
 	defer func() {
@@ -166,41 +164,20 @@ func (u *UpgradeAction) Run() (err error) {
 
 	e := elemental.NewElemental(&u.config.Config)
 
-	if u.spec.RecoveryUpgrade {
-		upgradeImg = u.spec.Recovery
-		finalImageFile = filepath.Join(u.spec.Partitions.Recovery.MountPoint, "cOS", constants.RecoveryImgFile)
-	} else {
-		upgradeImg = u.spec.Active
-		finalImageFile = filepath.Join(u.spec.Partitions.State.MountPoint, "cOS", constants.ActiveImgFile)
-	}
+	upgradeImg = u.spec.Recovery
+	finalImageFile = filepath.Join(u.spec.Partitions.Recovery.MountPoint, constants.RecoveryImgFile)
 
-	umount, err := e.MountRWPartition(u.spec.Partitions.State)
+	err = u.mountPartitions(cleanup)
 	if err != nil {
-		return elementalError.NewFromError(err, elementalError.MountStatePartition)
+		u.Error("failed mounting partitions: %v", err)
+		return err
 	}
-	cleanup.Push(umount)
-	umount, err = e.MountRWPartition(u.spec.Partitions.Recovery)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.MountRecoveryPartition)
-	}
-	cleanup.Push(umount)
 
-	// Cleanup transition image file before leaving
-	cleanup.Push(func() error { return u.remove(upgradeImg.File) })
-
-	// Recovery does not mount persistent, so try to mount it. Ignore errors, as it's not mandatory.
-	persistentPart := u.spec.Partitions.Persistent
-	if persistentPart != nil {
-		// Create the dir otherwise the check for mounted dir fails
-		_ = utils.MkdirAll(u.config.Fs, persistentPart.MountPoint, constants.DirPerm)
-		if mnt, err := utils.IsMounted(&u.config.Config, persistentPart); !mnt && err == nil {
-			u.Debug("mounting persistent partition")
-			umount, err = e.MountRWPartition(persistentPart)
-			if err != nil {
-				u.config.Logger.Warn("could not mount persistent partition: %s", err.Error())
-			} else {
-				cleanup.Push(umount)
-			}
+	if !u.spec.RecoveryUpgrade {
+		err = u.snapshotter.InitSnapshotter(u.spec.Partitions.State.MountPoint)
+		if err != nil {
+			// TODO add init snaphotter error
+			return err
 		}
 	}
 
@@ -211,35 +188,107 @@ func (u *UpgradeAction) Run() (err error) {
 		return elementalError.NewFromError(err, elementalError.HookBeforeUpgrade)
 	}
 
-	u.Info("deploying image %s to %s", upgradeImg.Source.Value(), upgradeImg.File)
-	// Deploy active image
-	upgradeMeta, treeCleaner, err := e.DeployImgTree(&upgradeImg, constants.WorkingImgDir)
-	if err != nil {
-		u.Error("Failed deploying image to file '%s': %s", upgradeImg.File, err)
-		return elementalError.NewFromError(err, elementalError.DeployImgTree)
-	}
-	cleanup.Push(func() error { return treeCleaner() })
-
-	// Selinux relabel
-	// Doesn't make sense to relabel a readonly filesystem
-	if upgradeImg.FS != constants.SquashFs {
-		// Relabel SELinux
-		// TODO probably relabelling persistent volumes should be an opt in feature, it could
-		// have undesired effects in case of failures
-		binds := map[string]string{}
-		if mnt, _ := utils.IsMounted(&u.config.Config, u.spec.Partitions.Persistent); mnt {
-			binds[u.spec.Partitions.Persistent.MountPoint] = constants.UsrLocalPath
-		}
-		if mnt, _ := utils.IsMounted(&u.config.Config, u.spec.Partitions.OEM); mnt {
-			binds[u.spec.Partitions.OEM.MountPoint] = constants.OEMPath
-		}
-		err = utils.ChrootedCallback(
-			&u.config.Config, constants.WorkingImgDir, binds,
-			func() error { return e.SelinuxRelabel("/", true) },
-		)
+	if !u.spec.RecoveryUpgrade {
+		activeSnap, err = u.snapshotter.StartTransaction()
 		if err != nil {
-			return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
+			u.Error("failed starting snapshot transaction: %v", err)
+			return err
 		}
+		cleanup.PushErrorOnly(func() error { return u.snapshotter.CloseTransactionOnError(activeSnap) })
+
+		// Deploy active image
+		upgradeMeta, err = e.DumpSource(activeSnap.WorkDir, u.spec.Active)
+		if err != nil {
+			u.Error("failed extracting %s image: %v", u.spec.Active.String(), err)
+			return elementalError.NewFromError(err, elementalError.DeployImgTree)
+		}
+	} else {
+		// Deploy recovery image
+		u.Info("deploying image %s to %s", upgradeImg.Source.Value(), upgradeImg.File)
+		upgradeMeta, treeCleaner, err = e.DeployImgTree(&upgradeImg, constants.WorkingImgDir)
+		if err != nil {
+			u.Error("Failed deploying image to file '%s': %s", upgradeImg.File, err)
+			return elementalError.NewFromError(err, elementalError.DeployImgTree)
+		}
+		cleanup.Push(func() error { return treeCleaner() })
+	}
+
+	err = u.refineDeployment()
+	if err != nil {
+		u.Error("failed refining dumped OS tree: %v", err)
+		return err
+	}
+
+	if !u.spec.RecoveryUpgrade {
+		err = u.snapshotter.CloseTransaction(activeSnap)
+		if err != nil {
+			u.Error("failed closing snapshot transaction: %v", err)
+			return err
+		}
+	} else {
+		err = e.CreateImgFromTree(constants.WorkingImgDir, &upgradeImg, false, treeCleaner)
+		if err != nil {
+			u.Error("failed creating transition image")
+			return elementalError.NewFromError(err, elementalError.CreateImgFromTree)
+		}
+
+		// TODO change mv call to fs.Rename
+		u.Info("Moving %s to %s", upgradeImg.File, finalImageFile)
+		_, err = u.config.Runner.Run("mv", "-f", upgradeImg.File, finalImageFile)
+		if err != nil {
+			u.Error("Failed to move %s to %s: %s", upgradeImg.File, finalImageFile, err)
+			return elementalError.NewFromError(err, elementalError.MoveFile)
+		}
+		u.Info("Finished moving %s to %s", upgradeImg.File, finalImageFile)
+
+		u.config.Runner.RunNoError("sync")
+	}
+
+	err = u.upgradeHook(constants.PostUpgradeHook)
+	if err != nil {
+		u.Error("Error running hook post-upgrade: %s", err)
+		return elementalError.NewFromError(err, elementalError.HookPostUpgrade)
+	}
+
+	if !u.spec.RecoveryUpgrade {
+		// Update state.yaml file on recovery and state partitions
+		err = u.upgradeInstallStateYaml(upgradeMeta, v1.Image{
+			File:   activeSnap.Path,
+			Label:  activeSnap.Label,
+			Size:   u.spec.SnapshotterCfg.Size,
+			FS:     u.spec.SnapshotterCfg.FS,
+			Source: u.spec.Active,
+		})
+		if err != nil {
+			u.Error("failed upgrading installation metadata")
+			return err
+		}
+	} else {
+		// Update state.yaml file on recovery and state partitions
+		err = u.upgradeInstallStateYaml(upgradeMeta, upgradeImg)
+		if err != nil {
+			u.Error("failed upgrading installation metadata")
+			return err
+		}
+	}
+
+	u.Info("Upgrade completed")
+
+	// Do not reboot/poweroff on cleanup errors
+	err = cleanup.Cleanup(err)
+	if err != nil {
+		return elementalError.NewFromError(err, elementalError.Cleanup)
+	}
+
+	return PowerAction(u.config)
+}
+
+func (u *UpgradeAction) refineDeployment() error {
+	// Relabel SELinux
+	err := applySelinuxLabels(&u.config.Config, u.spec.Partitions)
+	if err != nil {
+		u.Error("failed setting SELiux labels")
+		return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
 	}
 
 	err = u.upgradeChrootHook(constants.AfterUpgradeChrootHook, constants.WorkingImgDir)
@@ -263,78 +312,44 @@ func (u *UpgradeAction) Run() (err error) {
 		return elementalError.NewFromError(err, elementalError.SetGrubVariables)
 	}
 
-	// Only apply rebrand stage for system upgrades
-	if !u.spec.RecoveryUpgrade {
-		u.Info("rebranding")
+	u.Info("rebranding")
+	err = u.bootloader.SetDefaultEntry(u.spec.Partitions.State.MountPoint, constants.WorkingImgDir, u.spec.GrubDefEntry)
+	if err != nil {
+		u.Error("failed setting default entry")
+		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
+	}
 
-		err = u.bootloader.SetDefaultEntry(u.spec.Partitions.State.MountPoint, constants.WorkingImgDir, u.spec.GrubDefEntry)
-		if err != nil {
-			u.Error("failed setting default entry")
-			return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
+	return nil
+}
+
+func (u *UpgradeAction) mountPartitions(cleanup *utils.CleanStack) error {
+	umount, err := elemental.MountRWPartition(&u.config.Config, u.spec.Partitions.State)
+	if err != nil {
+		return elementalError.NewFromError(err, elementalError.MountStatePartition)
+	}
+	cleanup.Push(umount)
+	umount, err = elemental.MountRWPartition(&u.config.Config, u.spec.Partitions.Recovery)
+	if err != nil {
+		return elementalError.NewFromError(err, elementalError.MountRecoveryPartition)
+	}
+	cleanup.Push(umount)
+
+	// Recovery does not mount persistent, so try to mount it. Ignore errors, as it's not mandatory.
+	persistentPart := u.spec.Partitions.Persistent
+	if persistentPart != nil {
+		// Create the dir otherwise the check for mounted dir fails
+		_ = utils.MkdirAll(u.config.Fs, persistentPart.MountPoint, constants.DirPerm)
+		if mnt, err := utils.IsMounted(&u.config.Config, persistentPart); !mnt && err == nil {
+			u.Debug("mounting persistent partition")
+			umount, err = elemental.MountRWPartition(&u.config.Config, persistentPart)
+			if err != nil {
+				u.config.Logger.Warn("could not mount persistent partition: %s", err.Error())
+			} else {
+				cleanup.Push(umount)
+			}
 		}
 	}
-
-	err = e.CreateImgFromTree(constants.WorkingImgDir, &upgradeImg, false, treeCleaner)
-	if err != nil {
-		u.Error("failed creating transition image")
-		return elementalError.NewFromError(err, elementalError.CreateImgFromTree)
-	}
-
-	// If not upgrading recovery, backup active into passive
-	if !u.spec.RecoveryUpgrade {
-		//TODO this step could be part of elemental package
-		// backup current active.img to passive.img before overwriting the active.img
-		u.Info("Backing up current active image")
-		source := filepath.Join(u.spec.Partitions.State.MountPoint, "cOS", constants.ActiveImgFile)
-		u.Info("Moving %s to %s", source, u.spec.Passive.File)
-		_, err := u.config.Runner.Run("mv", "-f", source, u.spec.Passive.File)
-		if err != nil {
-			u.Error("Failed to move %s to %s: %s", source, u.spec.Passive.File, err)
-			return elementalError.NewFromError(err, elementalError.MoveFile)
-		}
-		u.Info("Finished moving %s to %s", source, u.spec.Passive.File)
-		// Label the image to passive!
-		out, err := u.config.Runner.Run("tune2fs", "-L", u.spec.Passive.Label, u.spec.Passive.File)
-		if err != nil {
-			u.Error("Error while labeling the passive image %s: %s", u.spec.Passive.File, err)
-			u.Debug("Error while labeling the passive image %s, command output: %s", out)
-			return elementalError.NewFromError(err, elementalError.LabelImage)
-		}
-		_, _ = u.config.Runner.Run("sync")
-	}
-
-	u.Info("Moving %s to %s", upgradeImg.File, finalImageFile)
-	_, err = u.config.Runner.Run("mv", "-f", upgradeImg.File, finalImageFile)
-	if err != nil {
-		u.Error("Failed to move %s to %s: %s", upgradeImg.File, finalImageFile, err)
-		return elementalError.NewFromError(err, elementalError.MoveFile)
-	}
-	u.Info("Finished moving %s to %s", upgradeImg.File, finalImageFile)
-
-	_, _ = u.config.Runner.Run("sync")
-
-	err = u.upgradeHook(constants.PostUpgradeHook)
-	if err != nil {
-		u.Error("Error running hook post-upgrade: %s", err)
-		return elementalError.NewFromError(err, elementalError.HookPostUpgrade)
-	}
-
-	// Update state.yaml file on recovery and state partitions
-	err = u.upgradeInstallStateYaml(upgradeMeta, upgradeImg)
-	if err != nil {
-		u.Error("failed upgrading installation metadata")
-		return err
-	}
-
-	u.Info("Upgrade completed")
-
-	// Do not reboot/poweroff on cleanup errors
-	err = cleanup.Cleanup(err)
-	if err != nil {
-		return elementalError.NewFromError(err, elementalError.Cleanup)
-	}
-
-	return PowerAction(u.config)
+	return nil
 }
 
 // remove attempts to remove the given path. Does nothing if it doesn't exist

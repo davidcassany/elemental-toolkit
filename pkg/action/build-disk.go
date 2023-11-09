@@ -174,7 +174,7 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 	}
 
 	// Copy cloud-init if any
-	err = e.CopyCloudConfig(b.roots[constants.OEMPartName], b.spec.CloudInit)
+	err = elemental.CopyCloudConfig(&b.cfg.Config, b.roots[constants.OEMPartName], b.spec.CloudInit)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.CopyFile)
 	}
@@ -628,11 +628,13 @@ func (b *BuildDiskAction) CreateDiskPartitionTable(disk string) error {
 func (b *BuildDiskAction) applySelinuxLabels(e *elemental.Elemental, root string, unprivileged bool) error {
 	if unprivileged {
 		// Swallow errors, label on a best effort when not chrooting
-		return e.SelinuxRelabel(root, false)
+		return elemental.SelinuxRelabel(&b.cfg.Config, root, false)
 	}
 	binds := map[string]string{}
 	return utils.ChrootedCallback(
-		&b.cfg.Config, root, binds, func() error { return e.SelinuxRelabel("/", true) },
+		&b.cfg.Config, root, binds, func() error {
+			return elemental.SelinuxRelabel(&b.cfg.Config, "/", true)
+		},
 	)
 }
 

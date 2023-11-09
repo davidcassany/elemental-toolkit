@@ -121,7 +121,7 @@ func (e Elemental) MountPartitions(parts v1.PartitionList) error {
 
 	for _, part := range parts {
 		if part.MountPoint != "" {
-			err = e.MountPartition(part, "rw")
+			err = MountPartition(e.config, part, "rw")
 			if err != nil {
 				_ = e.UnmountPartitions(parts)
 				return err
@@ -142,7 +142,7 @@ func (e Elemental) UnmountPartitions(parts v1.PartitionList) error {
 	// If there is an early error we still try to unmount other partitions
 	for _, part := range parts {
 		if part.MountPoint != "" {
-			err = e.UnmountPartition(part)
+			err = UnmountPartition(e.config, part)
 			if err != nil {
 				errMsg += fmt.Sprintf("Failed to unmount %s\n", part.MountPoint)
 				failure = true
@@ -156,57 +156,57 @@ func (e Elemental) UnmountPartitions(parts v1.PartitionList) error {
 }
 
 // MountRWPartition mounts, or remounts if needed, a partition with RW permissions
-func (e Elemental) MountRWPartition(part *v1.Partition) (umount func() error, err error) {
-	if mnt, _ := utils.IsMounted(e.config, part); mnt {
-		err = e.MountPartition(part, "remount", "rw")
+func MountRWPartition(cfg *v1.Config, part *v1.Partition) (umount func() error, err error) {
+	if mnt, _ := utils.IsMounted(cfg, part); mnt {
+		err = MountPartition(cfg, part, "remount", "rw")
 		if err != nil {
-			e.config.Logger.Errorf("failed mounting %s partition: %v", part.Name, err)
+			cfg.Logger.Errorf("failed mounting %s partition: %v", part.Name, err)
 			return nil, err
 		}
-		umount = func() error { return e.MountPartition(part, "remount", "ro") }
+		umount = func() error { return MountPartition(cfg, part, "remount", "ro") }
 	} else {
-		err = e.MountPartition(part, "rw")
+		err = MountPartition(cfg, part, "rw")
 		if err != nil {
-			e.config.Logger.Error("failed mounting %s partition: %v", part.Name, err)
+			cfg.Logger.Error("failed mounting %s partition: %v", part.Name, err)
 			return nil, err
 		}
-		umount = func() error { return e.UnmountPartition(part) }
+		umount = func() error { return UnmountPartition(cfg, part) }
 	}
 	return umount, nil
 }
 
 // MountPartition mounts a partition with the given mount options
-func (e Elemental) MountPartition(part *v1.Partition, opts ...string) error {
-	e.config.Logger.Debugf("Mounting partition %s", part.FilesystemLabel)
-	err := utils.MkdirAll(e.config.Fs, part.MountPoint, cnst.DirPerm)
+func MountPartition(cfg *v1.Config, part *v1.Partition, opts ...string) error {
+	cfg.Logger.Debugf("Mounting partition %s", part.FilesystemLabel)
+	err := utils.MkdirAll(cfg.Fs, part.MountPoint, cnst.DirPerm)
 	if err != nil {
 		return err
 	}
 	if part.Path == "" {
 		// Lets error out only after 10 attempts to find the device
-		device, err := utils.GetDeviceByLabel(e.config.Runner, part.FilesystemLabel, 10)
+		device, err := utils.GetDeviceByLabel(cfg.Runner, part.FilesystemLabel, 10)
 		if err != nil {
-			e.config.Logger.Errorf("Could not find a device with label %s", part.FilesystemLabel)
+			cfg.Logger.Errorf("Could not find a device with label %s", part.FilesystemLabel)
 			return err
 		}
 		part.Path = device
 	}
-	err = e.config.Mounter.Mount(part.Path, part.MountPoint, "auto", opts)
+	err = cfg.Mounter.Mount(part.Path, part.MountPoint, "auto", opts)
 	if err != nil {
-		e.config.Logger.Errorf("Failed mounting device %s with label %s", part.Path, part.FilesystemLabel)
+		cfg.Logger.Errorf("Failed mounting device %s with label %s", part.Path, part.FilesystemLabel)
 		return err
 	}
 	return nil
 }
 
 // UnmountPartition unmounts the given partition or does nothing if not mounted
-func (e Elemental) UnmountPartition(part *v1.Partition) error {
-	if mnt, _ := utils.IsMounted(e.config, part); !mnt {
-		e.config.Logger.Debugf("Not unmounting partition, %s doesn't look like mountpoint", part.MountPoint)
+func UnmountPartition(cfg *v1.Config, part *v1.Partition) error {
+	if mnt, _ := utils.IsMounted(cfg, part); !mnt {
+		cfg.Logger.Debugf("Not unmounting partition, %s doesn't look like mountpoint", part.MountPoint)
 		return nil
 	}
-	e.config.Logger.Debugf("Unmounting partition %s", part.FilesystemLabel)
-	return e.config.Mounter.Unmount(part.MountPoint)
+	cfg.Logger.Debugf("Unmounting partition %s", part.FilesystemLabel)
+	return cfg.Mounter.Unmount(part.MountPoint)
 }
 
 // TODO delete method
@@ -397,45 +397,45 @@ func (e *Elemental) DumpSource(target string, imgSrc *v1.ImageSource) (info inte
 }
 
 // CopyCloudConfig will check if there is a cloud init in the config and store it on the target
-func (e *Elemental) CopyCloudConfig(path string, cloudInit []string) (err error) {
+func CopyCloudConfig(cfg *v1.Config, path string, cloudInit []string) (err error) {
 	if path == "" {
-		e.config.Logger.Warnf("empty path. Will not copy cloud config files.")
+		cfg.Logger.Warnf("empty path. Will not copy cloud config files.")
 		return nil
 	}
 	for i, ci := range cloudInit {
 		customConfig := filepath.Join(path, fmt.Sprintf("9%d_custom.yaml", i))
-		err = utils.GetSource(e.config, ci, customConfig)
+		err = utils.GetSource(cfg, ci, customConfig)
 		if err != nil {
 			return err
 		}
-		if err = e.config.Fs.Chmod(customConfig, cnst.FilePerm); err != nil {
+		if err = cfg.Fs.Chmod(customConfig, cnst.FilePerm); err != nil {
 			return err
 		}
-		e.config.Logger.Infof("Finished copying cloud config file %s to %s", cloudInit, customConfig)
+		cfg.Logger.Infof("Finished copying cloud config file %s to %s", cloudInit, customConfig)
 	}
 	return nil
 }
 
 // SelinuxRelabel will relabel the system if it finds the binary and the context
-func (e *Elemental) SelinuxRelabel(rootDir string, raiseError bool) error {
-	policyFile, err := utils.FindFile(e.config.Fs, rootDir, filepath.Join(cnst.SELinuxTargetedPolicyPath, "policy.*"))
+func SelinuxRelabel(cfg *v1.Config, rootDir string, raiseError bool) error {
+	policyFile, err := utils.FindFile(cfg.Fs, rootDir, filepath.Join(cnst.SELinuxTargetedPolicyPath, "policy.*"))
 	contextFile := filepath.Join(rootDir, cnst.SELinuxTargetedContextFile)
-	contextExists, _ := utils.Exists(e.config.Fs, contextFile)
+	contextExists, _ := utils.Exists(cfg.Fs, contextFile)
 
-	if err == nil && contextExists && e.config.Runner.CommandExists("setfiles") {
+	if err == nil && contextExists && cfg.Runner.CommandExists("setfiles") {
 		var out []byte
 		var err error
 		if rootDir == "/" || rootDir == "" {
-			out, err = e.config.Runner.Run("setfiles", "-c", policyFile, "-e", "/dev", "-e", "/proc", "-e", "/sys", "-F", contextFile, "/")
+			out, err = cfg.Runner.Run("setfiles", "-c", policyFile, "-e", "/dev", "-e", "/proc", "-e", "/sys", "-F", contextFile, "/")
 		} else {
-			out, err = e.config.Runner.Run("setfiles", "-c", policyFile, "-F", "-r", rootDir, contextFile, rootDir)
+			out, err = cfg.Runner.Run("setfiles", "-c", policyFile, "-F", "-r", rootDir, contextFile, rootDir)
 		}
-		e.config.Logger.Debugf("SELinux setfiles output: %s", string(out))
+		cfg.Logger.Debugf("SELinux setfiles output: %s", string(out))
 		if err != nil && raiseError {
 			return err
 		}
 	} else {
-		e.config.Logger.Debugf("No files relabelling as SELinux utilities are not found")
+		cfg.Logger.Debugf("No files relabelling as SELinux utilities are not found")
 	}
 
 	return nil
