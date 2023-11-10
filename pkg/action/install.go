@@ -62,7 +62,7 @@ func NewInstallAction(cfg *v1.RunConfig, spec *v1.InstallSpec, opts ...InstallAc
 	}
 
 	if i.snapshotter == nil {
-		i.snapshotter = snapshotter.NewLoopDeviceSnapshotter(&cfg.Config, spec.SnapshotterCfg)
+		i.snapshotter = snapshotter.NewLoopDeviceSnapshotter(&cfg.Config, spec.SnapshotterCfg, i.bootloader)
 	}
 
 	return i

@@ -82,7 +82,7 @@ func NewResetAction(cfg *v1.RunConfig, spec *v1.ResetSpec, opts ...ResetActionOp
 	}
 
 	if r.snapshotter == nil {
-		r.snapshotter = snapshotter.NewLoopDeviceSnapshotter(&cfg.Config, spec.SnapshotterCfg)
+		r.snapshotter = snapshotter.NewLoopDeviceSnapshotter(&cfg.Config, spec.SnapshotterCfg, r.bootloader)
 	}
 
 	return r
