@@ -501,13 +501,37 @@ func SelinuxRelabel(cfg *v1.Config, rootDir string, raiseError bool) error {
 func CheckActiveDeployment(cfg *v1.Config) bool {
 	cfg.Logger.Infof("Checking for active deployment")
 
-	sentinels := []string{cnst.ActiveMode, cnst.PassiveMode, cnst.RecoveryMode}
-	for _, s := range sentinels {
-		if ok, _ := utils.Exists(cfg.Fs, s); ok {
+	tests := []func(*v1.Config) bool{IsActiveMode, IsPassiveMode, IsRecoveryMode}
+	for _, t := range tests {
+		if t(cfg) {
 			return true
 		}
 	}
 
+	return false
+}
+
+// IsActiveMode checks if the active mode sentinel file exists
+func IsActiveMode(cfg *v1.Config) bool {
+	if ok, _ := utils.Exists(cfg.Fs, cnst.ActiveMode); ok {
+		return true
+	}
+	return false
+}
+
+// IsPassiveMode checks if the passive mode sentinel file exists
+func IsPassiveMode(cfg *v1.Config) bool {
+	if ok, _ := utils.Exists(cfg.Fs, cnst.PassiveMode); ok {
+		return true
+	}
+	return false
+}
+
+// IsRecoveryMode checks if the recovery mode sentinel file exists
+func IsRecoveryMode(cfg *v1.Config) bool {
+	if ok, _ := utils.Exists(cfg.Fs, cnst.RecoveryMode); ok {
+		return true
+	}
 	return false
 }
 

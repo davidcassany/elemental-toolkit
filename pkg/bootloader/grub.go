@@ -21,7 +21,9 @@ import (
 	"fmt"
 	"path/filepath"
 	"regexp"
+	"strings"
 
+	"github.com/joho/godotenv"
 	"github.com/rancher/elemental-toolkit/pkg/constants"
 	v1 "github.com/rancher/elemental-toolkit/pkg/types/v1"
 	"github.com/rancher/elemental-toolkit/pkg/utils"
@@ -329,7 +331,7 @@ func (g *Grub) CreateEntry(shimName string, relativeTo string, efiVariables elee
 	return nil
 }
 
-// Sets the given key value pairs into as grub variables into the given file
+// SetPersistentVariables sets the given key value pairs into as grub variables into the given file
 func (g *Grub) SetPersistentVariables(grubEnvFile string, vars map[string]string) error {
 	cmd := "grub2-editenv"
 	if !g.runner.CommandExists(cmd) {
@@ -345,6 +347,30 @@ func (g *Grub) SetPersistentVariables(grubEnvFile string, vars map[string]string
 		}
 	}
 	return nil
+}
+
+// Sets the given key value pairs into as grub variables into the given file
+func (g *Grub) ListPersistentVariables(grubEnvFile string) (map[string]string, error) {
+	vars := map[string]string{}
+
+	cmd := "grub2-editenv"
+	if !g.runner.CommandExists(cmd) {
+		cmd = "grub-editenv"
+	}
+
+	out, err := g.runner.Run(cmd, grubEnvFile, "list")
+	if err != nil {
+		g.logger.Errorf("failed list variables from file %s: %v", grubEnvFile, err)
+		return nil, err
+	}
+
+	vars, err = godotenv.Parse(strings.NewReader(strings.TrimSpace(string(out))))
+	if err != nil {
+		g.logger.Errorf("failed parsing variables from file %s: %v", grubEnvFile, err)
+		return vars, err
+	}
+
+	return vars, nil
 }
 
 // SetDefaultEntry Sets the default_meny_entry value in RunConfig.GrubOEMEnv file at in

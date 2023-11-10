@@ -63,7 +63,7 @@ func NewUpgradeAction(config *v1.RunConfig, spec *v1.UpgradeSpec, opts ...Upgrad
 	}
 
 	if u.snapshotter == nil {
-		u.snapshotter = snapshotter.NewLoopDeviceSnapshotter(&config.Config, spec.SnapshotterCfg)
+		u.snapshotter = snapshotter.NewLoopDeviceSnapshotter(&config.Config, spec.SnapshotterCfg, u.bootloader)
 	}
 
 	return u
