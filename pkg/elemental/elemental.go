@@ -29,55 +29,44 @@ import (
 	"github.com/rancher/elemental-toolkit/pkg/utils"
 )
 
-// Elemental is the struct meant to self-contain most utils and actions related to Elemental, like installing or applying selinux
-type Elemental struct {
-	config *v1.Config
-}
-
-func NewElemental(config *v1.Config) *Elemental {
-	return &Elemental{
-		config: config,
-	}
-}
-
 // FormatPartition will format an already existing partition
-func (e *Elemental) FormatPartition(part *v1.Partition, opts ...string) error {
-	e.config.Logger.Infof("Formatting '%s' partition", part.Name)
-	return partitioner.FormatDevice(e.config.Runner, part.Path, part.FS, part.FilesystemLabel, opts...)
+func FormatPartition(c v1.Config, part *v1.Partition, opts ...string) error {
+	c.Logger.Infof("Formatting '%s' partition", part.Name)
+	return partitioner.FormatDevice(c.Runner, part.Path, part.FS, part.FilesystemLabel, opts...)
 }
 
 // PartitionAndFormatDevice creates a new empty partition table on target disk
 // and applies the configured disk layout by creating and formatting all
 // required partitions
-func (e *Elemental) PartitionAndFormatDevice(i *v1.InstallSpec) error {
+func PartitionAndFormatDevice(c v1.Config, i *v1.InstallSpec) error {
 	disk := partitioner.NewDisk(
 		i.Target,
-		partitioner.WithRunner(e.config.Runner),
-		partitioner.WithFS(e.config.Fs),
-		partitioner.WithLogger(e.config.Logger),
+		partitioner.WithRunner(c.Runner),
+		partitioner.WithFS(c.Fs),
+		partitioner.WithLogger(c.Logger),
 	)
 
 	if !disk.Exists() {
-		e.config.Logger.Errorf("Disk %s does not exist", i.Target)
+		c.Logger.Errorf("Disk %s does not exist", i.Target)
 		return fmt.Errorf("disk %s does not exist", i.Target)
 	}
 
-	e.config.Logger.Infof("Partitioning device...")
+	c.Logger.Infof("Partitioning device...")
 	out, err := disk.NewPartitionTable(i.PartTable)
 	if err != nil {
-		e.config.Logger.Errorf("Failed creating new partition table: %s", out)
+		c.Logger.Errorf("Failed creating new partition table: %s", out)
 		return err
 	}
 
 	parts := i.Partitions.PartitionsByInstallOrder(i.ExtraPartitions)
-	return e.createPartitions(disk, parts)
+	return createPartitions(c, disk, parts)
 }
 
-func (e *Elemental) createAndFormatPartition(disk *partitioner.Disk, part *v1.Partition) error {
-	e.config.Logger.Debugf("Adding partition %s", part.Name)
+func createAndFormatPartition(c v1.Config, disk *partitioner.Disk, part *v1.Partition) error {
+	c.Logger.Debugf("Adding partition %s", part.Name)
 	num, err := disk.AddPartition(part.Size, part.FS, part.Name, part.Flags...)
 	if err != nil {
-		e.config.Logger.Errorf("Failed creating %s partition", part.Name)
+		c.Logger.Errorf("Failed creating %s partition", part.Name)
 		return err
 	}
 	partDev, err := disk.FindPartitionDevice(num)
@@ -85,17 +74,17 @@ func (e *Elemental) createAndFormatPartition(disk *partitioner.Disk, part *v1.Pa
 		return err
 	}
 	if part.FS != "" {
-		e.config.Logger.Debugf("Formatting partition with label %s", part.FilesystemLabel)
-		err = partitioner.FormatDevice(e.config.Runner, partDev, part.FS, part.FilesystemLabel)
+		c.Logger.Debugf("Formatting partition with label %s", part.FilesystemLabel)
+		err = partitioner.FormatDevice(c.Runner, partDev, part.FS, part.FilesystemLabel)
 		if err != nil {
-			e.config.Logger.Errorf("Failed formatting partition %s", part.Name)
+			c.Logger.Errorf("Failed formatting partition %s", part.Name)
 			return err
 		}
 	} else {
-		e.config.Logger.Debugf("Wipe file system on %s", part.Name)
+		c.Logger.Debugf("Wipe file system on %s", part.Name)
 		err = disk.WipeFsOnPartition(partDev)
 		if err != nil {
-			e.config.Logger.Errorf("Failed to wipe filesystem of partition %s", partDev)
+			c.Logger.Errorf("Failed to wipe filesystem of partition %s", partDev)
 			return err
 		}
 	}
@@ -103,9 +92,9 @@ func (e *Elemental) createAndFormatPartition(disk *partitioner.Disk, part *v1.Pa
 	return nil
 }
 
-func (e *Elemental) createPartitions(disk *partitioner.Disk, parts v1.PartitionList) error {
+func createPartitions(c v1.Config, disk *partitioner.Disk, parts v1.PartitionList) error {
 	for _, part := range parts {
-		err := e.createAndFormatPartition(disk, part)
+		err := createAndFormatPartition(c, disk, part)
 		if err != nil {
 			return err
 		}
@@ -115,15 +104,15 @@ func (e *Elemental) createPartitions(disk *partitioner.Disk, parts v1.PartitionL
 
 // MountPartitions mounts configured partitions. Partitions with an unset mountpoint are not mounted.
 // Note umounts must be handled by caller logic.
-func (e Elemental) MountPartitions(parts v1.PartitionList) error {
-	e.config.Logger.Infof("Mounting disk partitions")
+func MountPartitions(c v1.Config, parts v1.PartitionList) error {
+	c.Logger.Infof("Mounting disk partitions")
 	var err error
 
 	for _, part := range parts {
 		if part.MountPoint != "" {
-			err = e.MountPartition(part, "rw")
+			err = MountPartition(c, part, "rw")
 			if err != nil {
-				_ = e.UnmountPartitions(parts)
+				_ = UnmountPartitions(c, parts)
 				return err
 			}
 		}
@@ -133,8 +122,8 @@ func (e Elemental) MountPartitions(parts v1.PartitionList) error {
 }
 
 // UnmountPartitions unmounts configured partitiosn. Partitions with an unset mountpoint are not unmounted.
-func (e Elemental) UnmountPartitions(parts v1.PartitionList) error {
-	e.config.Logger.Infof("Unmounting disk partitions")
+func UnmountPartitions(c v1.Config, parts v1.PartitionList) error {
+	c.Logger.Infof("Unmounting disk partitions")
 	var err error
 	errMsg := ""
 	failure := false
@@ -142,7 +131,7 @@ func (e Elemental) UnmountPartitions(parts v1.PartitionList) error {
 	// If there is an early error we still try to unmount other partitions
 	for _, part := range parts {
 		if part.MountPoint != "" {
-			err = e.UnmountPartition(part)
+			err = UnmountPartition(c, part)
 			if err != nil {
 				errMsg += fmt.Sprintf("Failed to unmount %s\n", part.MountPoint)
 				failure = true
@@ -156,77 +145,77 @@ func (e Elemental) UnmountPartitions(parts v1.PartitionList) error {
 }
 
 // MountRWPartition mounts, or remounts if needed, a partition with RW permissions
-func (e Elemental) MountRWPartition(part *v1.Partition) (umount func() error, err error) {
-	if mnt, _ := utils.IsMounted(e.config, part); mnt {
-		err = e.MountPartition(part, "remount", "rw")
+func MountRWPartition(c v1.Config, part *v1.Partition) (umount func() error, err error) {
+	if mnt, _ := utils.IsMounted(c, part); mnt {
+		err = MountPartition(c, part, "remount", "rw")
 		if err != nil {
-			e.config.Logger.Errorf("failed mounting %s partition: %v", part.Name, err)
+			c.Logger.Errorf("failed mounting %s partition: %v", part.Name, err)
 			return nil, err
 		}
-		umount = func() error { return e.MountPartition(part, "remount", "ro") }
+		umount = func() error { return MountPartition(c, part, "remount", "ro") }
 	} else {
-		err = e.MountPartition(part, "rw")
+		err = MountPartition(c, part, "rw")
 		if err != nil {
-			e.config.Logger.Error("failed mounting %s partition: %v", part.Name, err)
+			c.Logger.Error("failed mounting %s partition: %v", part.Name, err)
 			return nil, err
 		}
-		umount = func() error { return e.UnmountPartition(part) }
+		umount = func() error { return UnmountPartition(c, part) }
 	}
 	return umount, nil
 }
 
 // MountPartition mounts a partition with the given mount options
-func (e Elemental) MountPartition(part *v1.Partition, opts ...string) error {
-	e.config.Logger.Debugf("Mounting partition %s", part.FilesystemLabel)
-	err := utils.MkdirAll(e.config.Fs, part.MountPoint, cnst.DirPerm)
+func MountPartition(c v1.Config, part *v1.Partition, opts ...string) error {
+	c.Logger.Debugf("Mounting partition %s", part.FilesystemLabel)
+	err := utils.MkdirAll(c.Fs, part.MountPoint, cnst.DirPerm)
 	if err != nil {
 		return err
 	}
 	if part.Path == "" {
 		// Lets error out only after 10 attempts to find the device
-		device, err := utils.GetDeviceByLabel(e.config.Runner, part.FilesystemLabel, 10)
+		device, err := utils.GetDeviceByLabel(c.Runner, part.FilesystemLabel, 10)
 		if err != nil {
-			e.config.Logger.Errorf("Could not find a device with label %s", part.FilesystemLabel)
+			c.Logger.Errorf("Could not find a device with label %s", part.FilesystemLabel)
 			return err
 		}
 		part.Path = device
 	}
-	err = e.config.Mounter.Mount(part.Path, part.MountPoint, "auto", opts)
+	err = c.Mounter.Mount(part.Path, part.MountPoint, "auto", opts)
 	if err != nil {
-		e.config.Logger.Errorf("Failed mounting device %s with label %s", part.Path, part.FilesystemLabel)
+		c.Logger.Errorf("Failed mounting device %s with label %s", part.Path, part.FilesystemLabel)
 		return err
 	}
 	return nil
 }
 
 // UnmountPartition unmounts the given partition or does nothing if not mounted
-func (e Elemental) UnmountPartition(part *v1.Partition) error {
-	if mnt, _ := utils.IsMounted(e.config, part); !mnt {
-		e.config.Logger.Debugf("Not unmounting partition, %s doesn't look like mountpoint", part.MountPoint)
+func UnmountPartition(c v1.Config, part *v1.Partition) error {
+	if mnt, _ := utils.IsMounted(c, part); !mnt {
+		c.Logger.Debugf("Not unmounting partition, %s doesn't look like mountpoint", part.MountPoint)
 		return nil
 	}
-	e.config.Logger.Debugf("Unmounting partition %s", part.FilesystemLabel)
-	return e.config.Mounter.Unmount(part.MountPoint)
+	c.Logger.Debugf("Unmounting partition %s", part.FilesystemLabel)
+	return c.Mounter.Unmount(part.MountPoint)
 }
 
 // MountImage mounts an image with the given mount options
-func (e Elemental) MountImage(img *v1.Image, opts ...string) error {
-	e.config.Logger.Debugf("Mounting image %s to %s", img.Label, img.MountPoint)
-	err := utils.MkdirAll(e.config.Fs, img.MountPoint, cnst.DirPerm)
+func MountImage(c v1.Config, img *v1.Image, opts ...string) error {
+	c.Logger.Debugf("Mounting image %s to %s", img.Label, img.MountPoint)
+	err := utils.MkdirAll(c.Fs, img.MountPoint, cnst.DirPerm)
 	if err != nil {
-		e.config.Logger.Errorf("Failed creating mountpoint %s", img.MountPoint)
+		c.Logger.Errorf("Failed creating mountpoint %s", img.MountPoint)
 		return err
 	}
-	out, err := e.config.Runner.Run("losetup", "--show", "-f", img.File)
+	out, err := c.Runner.Run("losetup", "--show", "-f", img.File)
 	if err != nil {
-		e.config.Logger.Errorf("Failed setting a loop device for %s", img.File)
+		c.Logger.Errorf("Failed setting a loop device for %s", img.File)
 		return err
 	}
 	loop := strings.TrimSpace(string(out))
-	err = e.config.Mounter.Mount(loop, img.MountPoint, "auto", opts)
+	err = c.Mounter.Mount(loop, img.MountPoint, "auto", opts)
 	if err != nil {
-		e.config.Logger.Errorf("Failed to mount %s", loop)
-		_, _ = e.config.Runner.Run("losetup", "-d", loop)
+		c.Logger.Errorf("Failed to mount %s", loop)
+		_, _ = c.Runner.Run("losetup", "-d", loop)
 		return err
 	}
 	img.LoopDevice = loop
@@ -234,39 +223,39 @@ func (e Elemental) MountImage(img *v1.Image, opts ...string) error {
 }
 
 // UnmountImage unmounts the given image or does nothing if not mounted
-func (e Elemental) UnmountImage(img *v1.Image) error {
+func UnmountImage(c v1.Config, img *v1.Image) error {
 	// Using IsLikelyNotMountPoint seams to be safe as we are not checking
 	// for bind mounts here
-	if notMnt, _ := e.config.Mounter.IsLikelyNotMountPoint(img.MountPoint); notMnt {
-		e.config.Logger.Debugf("Not unmounting image, %s doesn't look like mountpoint", img.MountPoint)
+	if notMnt, _ := c.Mounter.IsLikelyNotMountPoint(img.MountPoint); notMnt {
+		c.Logger.Debugf("Not unmounting image, %s doesn't look like mountpoint", img.MountPoint)
 		return nil
 	}
 
-	e.config.Logger.Debugf("Unmounting image %s from %s", img.Label, img.MountPoint)
-	err := e.config.Mounter.Unmount(img.MountPoint)
+	c.Logger.Debugf("Unmounting image %s from %s", img.Label, img.MountPoint)
+	err := c.Mounter.Unmount(img.MountPoint)
 	if err != nil {
 		return err
 	}
-	_, err = e.config.Runner.Run("losetup", "-d", img.LoopDevice)
+	_, err = c.Runner.Run("losetup", "-d", img.LoopDevice)
 	img.LoopDevice = ""
 	return err
 }
 
 // CreateFileSystemImage creates the image file for the given image
-func (e Elemental) CreateFileSystemImage(img *v1.Image) error {
-	return e.CreatePreLoadedFileSystemImage(img, "")
+func CreateFileSystemImage(c v1.Config, img *v1.Image) error {
+	return CreatePreLoadedFileSystemImage(c, img, "")
 }
 
 // CreatePreLoadedFileSystemImage creates the image file for the given image including the contents of the rootDir.
 // If rootDir is empty it simply creates an empty filesystem image
-func (e Elemental) CreatePreLoadedFileSystemImage(img *v1.Image, rootDir string) error {
-	e.config.Logger.Infof("Creating filesystem image %s with size: %d", img.File, img.Size)
-	err := utils.MkdirAll(e.config.Fs, filepath.Dir(img.File), cnst.DirPerm)
+func CreatePreLoadedFileSystemImage(c v1.Config, img *v1.Image, rootDir string) error {
+	c.Logger.Infof("Creating filesystem image %s with size: %d", img.File, img.Size)
+	err := utils.MkdirAll(c.Fs, filepath.Dir(img.File), cnst.DirPerm)
 	if err != nil {
 		return err
 	}
 
-	err = utils.CreateRAWFile(e.config.Fs, img.File, img.Size)
+	err = utils.CreateRAWFile(c.Fs, img.File, img.Size)
 	if err != nil {
 		return err
 	}
@@ -275,18 +264,18 @@ func (e Elemental) CreatePreLoadedFileSystemImage(img *v1.Image, rootDir string)
 
 	// Only add the rootDir if it's not empty
 	match, _ := regexp.MatchString("ext[2-4]", img.FS)
-	exists, _ := utils.Exists(e.config.Fs, rootDir)
+	exists, _ := utils.Exists(c.Fs, rootDir)
 	if !match && exists {
-		e.config.Logger.Infof("Pre-loaded image creation is only available for ext[2-4] filesystems, ignoring options for %s", img.FS)
+		c.Logger.Infof("Pre-loaded image creation is only available for ext[2-4] filesystems, ignoring options for %s", img.FS)
 	}
 	if exists && match {
 		extraOpts = []string{"-d", rootDir}
 	}
 
-	mkfs := partitioner.NewMkfsCall(img.File, img.FS, img.Label, e.config.Runner, extraOpts...)
+	mkfs := partitioner.NewMkfsCall(img.File, img.FS, img.Label, c.Runner, extraOpts...)
 	_, err = mkfs.Apply()
 	if err != nil {
-		_ = e.config.Fs.RemoveAll(img.File)
+		_ = c.Fs.RemoveAll(img.File)
 		return err
 	}
 	return nil
@@ -295,43 +284,43 @@ func (e Elemental) CreatePreLoadedFileSystemImage(img *v1.Image, rootDir string)
 // DeployImgTree will deploy the given image into the given root tree. Returns source metadata in info,
 // a tree cleaner function and error. The given root will be a bind mount of a temporary directory into the same
 // filesystem of img.File, this is helpful to make the deployment easily accessible in after-* hooks.
-func (e *Elemental) DeployImgTree(img *v1.Image, root string) (info interface{}, cleaner func() error, err error) {
+func DeployImgTree(c v1.Config, img *v1.Image, root string) (info interface{}, cleaner func() error, err error) {
 	// We prepare the rootTree next to the target image file, in the same base path
-	e.config.Logger.Infof("Preparing root tree for image: %s", img.File)
+	c.Logger.Infof("Preparing root tree for image: %s", img.File)
 	tmp := strings.TrimSuffix(img.File, filepath.Ext(img.File))
 	tmp += ".imgTree"
-	err = utils.MkdirAll(e.config.Fs, tmp, cnst.DirPerm)
+	err = utils.MkdirAll(c.Fs, tmp, cnst.DirPerm)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	err = utils.MkdirAll(e.config.Fs, root, cnst.DirPerm)
+	err = utils.MkdirAll(c.Fs, root, cnst.DirPerm)
 	if err != nil {
-		_ = e.config.Fs.RemoveAll(tmp)
+		_ = c.Fs.RemoveAll(tmp)
 		return nil, nil, err
 	}
-	err = e.config.Mounter.Mount(tmp, root, "bind", []string{"bind"})
+	err = c.Mounter.Mount(tmp, root, "bind", []string{"bind"})
 	if err != nil {
-		_ = e.config.Fs.RemoveAll(tmp)
-		_ = e.config.Fs.RemoveAll(root)
+		_ = c.Fs.RemoveAll(tmp)
+		_ = c.Fs.RemoveAll(root)
 		return nil, nil, err
 	}
 
 	cleaner = func() error {
-		_ = e.config.Mounter.Unmount(root)
-		err := e.config.Fs.RemoveAll(root)
+		_ = c.Mounter.Unmount(root)
+		err := c.Fs.RemoveAll(root)
 		if err != nil {
 			return err
 		}
-		return e.config.Fs.RemoveAll(tmp)
+		return c.Fs.RemoveAll(tmp)
 	}
 
-	info, err = e.DumpSource(root, img.Source)
+	info, err = DumpSource(c, root, img.Source)
 	if err != nil {
 		_ = cleaner()
 		return nil, nil, err
 	}
-	err = utils.CreateDirStructure(e.config.Fs, root)
+	err = utils.CreateDirStructure(c.Fs, root)
 	if err != nil {
 		_ = cleaner()
 		return nil, nil, err
@@ -342,7 +331,7 @@ func (e *Elemental) DeployImgTree(img *v1.Image, root string) (info interface{},
 
 // CreateImgFromTree creates the given image from with the contents of the tree for the given root.
 // NoMount flag allows formatting an image including its contents (experimental and ext* specific)
-func (e *Elemental) CreateImgFromTree(root string, img *v1.Image, noMount bool, cleaner func() error) (err error) {
+func CreateImgFromTree(c v1.Config, root string, img *v1.Image, noMount bool, cleaner func() error) (err error) {
 	if cleaner != nil {
 		defer func() {
 			cErr := cleaner()
@@ -358,43 +347,43 @@ func (e *Elemental) CreateImgFromTree(root string, img *v1.Image, noMount bool, 
 	}
 
 	if img.FS == cnst.SquashFs {
-		e.config.Logger.Infof("Creating squashed image: %s", img.File)
-		err = utils.MkdirAll(e.config.Fs, filepath.Dir(img.File), cnst.DirPerm)
+		c.Logger.Infof("Creating squashed image: %s", img.File)
+		err = utils.MkdirAll(c.Fs, filepath.Dir(img.File), cnst.DirPerm)
 		if err != nil {
-			e.config.Logger.Errorf("failed creating destination folder: %s", err.Error())
+			c.Logger.Errorf("failed creating destination folder: %s", err.Error())
 			return err
 		}
-		squashOptions := append(cnst.GetDefaultSquashfsOptions(), e.config.SquashFsCompressionConfig...)
-		err = utils.CreateSquashFS(e.config.Runner, e.config.Logger, root, img.File, squashOptions)
+		squashOptions := append(cnst.GetDefaultSquashfsOptions(), c.SquashFsCompressionConfig...)
+		err = utils.CreateSquashFS(c.Runner, c.Logger, root, img.File, squashOptions)
 		if err != nil {
 			return err
 		}
 	} else {
 		if img.Size == 0 {
-			size, err := utils.DirSizeMB(e.config.Fs, root)
+			size, err := utils.DirSizeMB(c.Fs, root)
 			if err != nil {
 				return err
 			}
 			img.Size = size + cnst.ImgOverhead
 		}
-		err = e.CreatePreLoadedFileSystemImage(img, preLoadRoot)
+		err = CreatePreLoadedFileSystemImage(c, img, preLoadRoot)
 		if err != nil {
 			return err
 		}
 
 		if !noMount {
-			err = e.MountImage(img, "rw")
+			err = MountImage(c, img, "rw")
 			if err != nil {
 				return err
 			}
 			defer func() {
-				mErr := e.UnmountImage(img)
+				mErr := UnmountImage(c, img)
 				if err == nil && mErr != nil {
 					err = mErr
 				}
 			}()
-			e.config.Logger.Infof("Sync %s to %s", root, img.MountPoint)
-			err = utils.SyncData(e.config.Logger, e.config.Runner, e.config.Fs, root, img.MountPoint)
+			c.Logger.Infof("Sync %s to %s", root, img.MountPoint)
+			err = utils.SyncData(c.Logger, c.Runner, c.Fs, root, img.MountPoint)
 			if err != nil {
 				return err
 			}
@@ -404,39 +393,39 @@ func (e *Elemental) CreateImgFromTree(root string, img *v1.Image, noMount bool, 
 }
 
 // CopyFileImg copies the files target as the source of this image. It also applies the img label over the copied image.
-func (e *Elemental) CopyFileImg(img *v1.Image) error {
+func CopyFileImg(c v1.Config, img *v1.Image) error {
 	if !img.Source.IsFile() {
 		return fmt.Errorf("Copying a file image requires an image source of file type")
 	}
 
-	err := utils.MkdirAll(e.config.Fs, filepath.Dir(img.File), cnst.DirPerm)
+	err := utils.MkdirAll(c.Fs, filepath.Dir(img.File), cnst.DirPerm)
 	if err != nil {
 		return err
 	}
 
-	e.config.Logger.Infof("Copying image %s to %s", img.Source.Value(), img.File)
-	err = utils.CopyFile(e.config.Fs, img.Source.Value(), img.File)
+	c.Logger.Infof("Copying image %s to %s", img.Source.Value(), img.File)
+	err = utils.CopyFile(c.Fs, img.Source.Value(), img.File)
 	if err != nil {
 		return err
 	}
 
 	if img.FS != cnst.SquashFs && img.Label != "" {
-		e.config.Logger.Infof("Setting label: %s ", img.Label)
-		_, err = e.config.Runner.Run("tune2fs", "-L", img.Label, img.File)
+		c.Logger.Infof("Setting label: %s ", img.Label)
+		_, err = c.Runner.Run("tune2fs", "-L", img.Label, img.File)
 	}
 	return err
 }
 
 // DeployImage will deploy the given image into the target. This method
 // creates the filesystem image file and fills it with the correspondant data
-func (e *Elemental) DeployImage(img *v1.Image) (interface{}, error) {
-	e.config.Logger.Infof("Deploying image: %s", img.File)
-	info, cleaner, err := e.DeployImgTree(img, cnst.WorkingImgDir)
+func DeployImage(c v1.Config, img *v1.Image) (interface{}, error) {
+	c.Logger.Infof("Deploying image: %s", img.File)
+	info, cleaner, err := DeployImgTree(c, img, cnst.WorkingImgDir)
 	if err != nil {
 		return nil, err
 	}
 
-	err = e.CreateImgFromTree(cnst.WorkingImgDir, img, false, cleaner)
+	err = CreateImgFromTree(c, cnst.WorkingImgDir, img, false, cleaner)
 	if err != nil {
 		return nil, err
 	}
@@ -444,114 +433,114 @@ func (e *Elemental) DeployImage(img *v1.Image) (interface{}, error) {
 }
 
 // DumpSource sets the image data according to the image source type
-func (e *Elemental) DumpSource(target string, imgSrc *v1.ImageSource) (info interface{}, err error) { // nolint:gocyclo
-	e.config.Logger.Infof("Copying %s source...", imgSrc.Value())
+func DumpSource(c v1.Config, target string, imgSrc *v1.ImageSource) (info interface{}, err error) { // nolint:gocyclo
+	c.Logger.Infof("Copying %s source...", imgSrc.Value())
 
-	err = utils.MkdirAll(e.config.Fs, target, cnst.DirPerm)
+	err = utils.MkdirAll(c.Fs, target, cnst.DirPerm)
 	if err != nil {
-		e.config.Logger.Errorf("failed to create target directory %s", target)
+		c.Logger.Errorf("failed to create target directory %s", target)
 		return nil, err
 	}
 
 	if imgSrc.IsImage() {
-		if e.config.Cosign {
-			e.config.Logger.Infof("Running cosing verification for %s", imgSrc.Value())
+		if c.Cosign {
+			c.Logger.Infof("Running cosing verification for %s", imgSrc.Value())
 			out, err := utils.CosignVerify(
-				e.config.Fs, e.config.Runner, imgSrc.Value(),
-				e.config.CosignPubKey, v1.IsDebugLevel(e.config.Logger),
+				c.Fs, c.Runner, imgSrc.Value(),
+				c.CosignPubKey, v1.IsDebugLevel(c.Logger),
 			)
 			if err != nil {
-				e.config.Logger.Errorf("Cosign verification failed: %s", out)
+				c.Logger.Errorf("Cosign verification failed: %s", out)
 				return nil, err
 			}
 		}
 
-		err = e.config.ImageExtractor.ExtractImage(imgSrc.Value(), target, e.config.Platform.String(), e.config.LocalImage)
+		err = c.ImageExtractor.ExtractImage(imgSrc.Value(), target, c.Platform.String(), c.LocalImage)
 		if err != nil {
 			return nil, err
 		}
 	} else if imgSrc.IsDir() {
 		excludes := []string{"/mnt", "/proc", "/sys", "/dev", "/tmp", "/host", "/run"}
-		err = utils.SyncData(e.config.Logger, e.config.Runner, e.config.Fs, imgSrc.Value(), target, excludes...)
+		err = utils.SyncData(c.Logger, c.Runner, c.Fs, imgSrc.Value(), target, excludes...)
 		if err != nil {
 			return nil, err
 		}
 	} else if imgSrc.IsFile() {
-		err = utils.MkdirAll(e.config.Fs, cnst.ImgSrcDir, cnst.DirPerm)
+		err = utils.MkdirAll(c.Fs, cnst.ImgSrcDir, cnst.DirPerm)
 		if err != nil {
 			return nil, err
 		}
 		img := &v1.Image{File: imgSrc.Value(), MountPoint: cnst.ImgSrcDir}
-		err = e.MountImage(img, "auto", "ro")
+		err = MountImage(c, img, "auto", "ro")
 		if err != nil {
 			return nil, err
 		}
-		defer e.UnmountImage(img) // nolint:errcheck
+		defer UnmountImage(c, img) // nolint:errcheck
 		excludes := []string{"/mnt", "/proc", "/sys", "/dev", "/tmp", "/host", "/run"}
-		err = utils.SyncData(e.config.Logger, e.config.Runner, e.config.Fs, cnst.ImgSrcDir, target, excludes...)
+		err = utils.SyncData(c.Logger, c.Runner, c.Fs, cnst.ImgSrcDir, target, excludes...)
 		if err != nil {
 			return nil, err
 		}
 	} else {
 		return nil, fmt.Errorf("unknown image source type")
 	}
-	e.config.Logger.Infof("Finished copying %s into %s", imgSrc.Value(), target)
+	c.Logger.Infof("Finished copying %s into %s", imgSrc.Value(), target)
 	return info, nil
 }
 
 // CopyCloudConfig will check if there is a cloud init in the config and store it on the target
-func (e *Elemental) CopyCloudConfig(path string, cloudInit []string) (err error) {
+func CopyCloudConfig(c v1.Config, path string, cloudInit []string) (err error) {
 	if path == "" {
-		e.config.Logger.Warnf("empty path. Will not copy cloud config files.")
+		c.Logger.Warnf("empty path. Will not copy cloud config files.")
 		return nil
 	}
 	for i, ci := range cloudInit {
 		customConfig := filepath.Join(path, fmt.Sprintf("9%d_custom.yaml", i))
-		err = utils.GetSource(e.config, ci, customConfig)
+		err = utils.GetSource(c, ci, customConfig)
 		if err != nil {
 			return err
 		}
-		if err = e.config.Fs.Chmod(customConfig, cnst.FilePerm); err != nil {
+		if err = c.Fs.Chmod(customConfig, cnst.FilePerm); err != nil {
 			return err
 		}
-		e.config.Logger.Infof("Finished copying cloud config file %s to %s", cloudInit, customConfig)
+		c.Logger.Infof("Finished copying cloud config file %s to %s", cloudInit, customConfig)
 	}
 	return nil
 }
 
 // SelinuxRelabel will relabel the system if it finds the binary and the context
-func (e *Elemental) SelinuxRelabel(rootDir string, raiseError bool) error {
-	policyFile, err := utils.FindFile(e.config.Fs, rootDir, filepath.Join(cnst.SELinuxTargetedPolicyPath, "policy.*"))
+func SelinuxRelabel(c v1.Config, rootDir string, raiseError bool) error {
+	policyFile, err := utils.FindFile(c.Fs, rootDir, filepath.Join(cnst.SELinuxTargetedPolicyPath, "policy.*"))
 	contextFile := filepath.Join(rootDir, cnst.SELinuxTargetedContextFile)
-	contextExists, _ := utils.Exists(e.config.Fs, contextFile)
+	contextExists, _ := utils.Exists(c.Fs, contextFile)
 
-	if err == nil && contextExists && e.config.Runner.CommandExists("setfiles") {
+	if err == nil && contextExists && c.Runner.CommandExists("setfiles") {
 		var out []byte
 		var err error
 		if rootDir == "/" || rootDir == "" {
-			out, err = e.config.Runner.Run("setfiles", "-c", policyFile, "-e", "/dev", "-e", "/proc", "-e", "/sys", "-F", contextFile, "/")
+			out, err = c.Runner.Run("setfiles", "-c", policyFile, "-e", "/dev", "-e", "/proc", "-e", "/sys", "-F", contextFile, "/")
 		} else {
-			out, err = e.config.Runner.Run("setfiles", "-c", policyFile, "-F", "-r", rootDir, contextFile, rootDir)
+			out, err = c.Runner.Run("setfiles", "-c", policyFile, "-F", "-r", rootDir, contextFile, rootDir)
 		}
-		e.config.Logger.Debugf("SELinux setfiles output: %s", string(out))
+		c.Logger.Debugf("SELinux setfiles output: %s", string(out))
 		if err != nil && raiseError {
 			return err
 		}
 	} else {
-		e.config.Logger.Debugf("No files relabelling as SELinux utilities are not found")
+		c.Logger.Debugf("No files relabelling as SELinux utilities are not found")
 	}
 
 	return nil
 }
 
 // CheckActiveDeployment returns true if at least one of the provided filesystem labels is found within the system
-func (e *Elemental) CheckActiveDeployment(labels []string) bool {
-	e.config.Logger.Infof("Checking for active deployment")
+func CheckActiveDeployment(c v1.Config, labels []string) bool {
+	c.Logger.Infof("Checking for active deployment")
 
 	for _, label := range labels {
-		found, _ := utils.GetDeviceByLabel(e.config.Runner, label, 1)
+		found, _ := utils.GetDeviceByLabel(c.Runner, label, 1)
 		if found != "" {
-			e.config.Logger.Debug("there is already an active deployment in the system")
+			c.Logger.Debug("there is already an active deployment in the system")
 			return true
 		}
 	}
@@ -560,36 +549,36 @@ func (e *Elemental) CheckActiveDeployment(labels []string) bool {
 
 // UpdateSourceISO downloads an ISO in a temporary folder, mounts it and updates active image to use the ISO squashfs image as
 // source. Returns a cleaner method to unmount and remove the temporary folder afterwards.
-func (e Elemental) UpdateSourceFormISO(iso string, activeImg *v1.Image) (func() error, error) {
+func UpdateSourceFormISO(c v1.Config, iso string, activeImg *v1.Image) (func() error, error) {
 	nilErr := func() error { return nil }
 
-	tmpDir, err := utils.TempDir(e.config.Fs, "", "elemental")
+	tmpDir, err := utils.TempDir(c.Fs, "", "elemental")
 	if err != nil {
 		return nilErr, err
 	}
 
-	cleanTmpDir := func() error { return e.config.Fs.RemoveAll(tmpDir) }
+	cleanTmpDir := func() error { return c.Fs.RemoveAll(tmpDir) }
 
 	tmpFile := filepath.Join(tmpDir, "elemental.iso")
-	err = utils.GetSource(e.config, iso, tmpFile)
+	err = utils.GetSource(c, iso, tmpFile)
 	if err != nil {
 		return cleanTmpDir, err
 	}
 
 	isoMnt := filepath.Join(tmpDir, "iso")
-	err = utils.MkdirAll(e.config.Fs, isoMnt, cnst.DirPerm)
+	err = utils.MkdirAll(c.Fs, isoMnt, cnst.DirPerm)
 	if err != nil {
 		return cleanTmpDir, err
 	}
 
-	e.config.Logger.Infof("Mounting iso %s into %s", tmpFile, isoMnt)
-	err = e.config.Mounter.Mount(tmpFile, isoMnt, "auto", []string{"loop"})
+	c.Logger.Infof("Mounting iso %s into %s", tmpFile, isoMnt)
+	err = c.Mounter.Mount(tmpFile, isoMnt, "auto", []string{"loop"})
 	if err != nil {
 		return cleanTmpDir, err
 	}
 
 	cleanAll := func() error {
-		cErr := e.config.Mounter.Unmount(isoMnt)
+		cErr := c.Mounter.Unmount(isoMnt)
 		if cErr != nil {
 			return cErr
 		}
@@ -597,7 +586,7 @@ func (e Elemental) UpdateSourceFormISO(iso string, activeImg *v1.Image) (func() 
 	}
 
 	squashfsImg := filepath.Join(isoMnt, cnst.ISORootFile)
-	ok, _ := utils.Exists(e.config.Fs, squashfsImg)
+	ok, _ := utils.Exists(c.Fs, squashfsImg)
 	if !ok {
 		return cleanAll, fmt.Errorf("squashfs image not found in ISO: %s", squashfsImg)
 	}
@@ -608,9 +597,9 @@ func (e Elemental) UpdateSourceFormISO(iso string, activeImg *v1.Image) (func() 
 
 // DeactivateDevice deactivates unmounted the block devices present within the system.
 // Useful to deactivate LVM volumes, if any, related to the target device.
-func (e Elemental) DeactivateDevices() {
+func DeactivateDevices(c v1.Config) {
 	// This is a best effort call, it does not error out
-	e.config.Runner.RunNoError(
+	c.Runner.RunNoError(
 		"blkdeactivate", "--lvmoptions", "retry,wholevg",
 		"--dmoptions", "force,retry", "--errors",
 	)

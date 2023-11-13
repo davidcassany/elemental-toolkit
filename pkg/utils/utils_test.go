@@ -629,24 +629,24 @@ var _ = Describe("Utils", Label("utils"), func() {
 	})
 	Describe("GetSource", Label("GetSource"), func() {
 		It("Fails on invalid url", func() {
-			Expect(utils.GetSource(config, "$htt:|//insane.stuff", "/tmp/dest")).NotTo(BeNil())
+			Expect(utils.GetSource(*config, "$htt:|//insane.stuff", "/tmp/dest")).NotTo(BeNil())
 		})
 		It("Fails on readonly destination", func() {
 			config.Fs = vfs.NewReadOnlyFS(fs)
-			Expect(utils.GetSource(config, "http://something.org", "/tmp/dest")).NotTo(BeNil())
+			Expect(utils.GetSource(*config, "http://something.org", "/tmp/dest")).NotTo(BeNil())
 		})
 		It("Fails on non existing local source", func() {
-			Expect(utils.GetSource(config, "/some/missing/file", "/tmp/dest")).NotTo(BeNil())
+			Expect(utils.GetSource(*config, "/some/missing/file", "/tmp/dest")).NotTo(BeNil())
 		})
 		It("Fails on http client error", func() {
 			client.Error = true
 			url := "https://missing.io"
-			Expect(utils.GetSource(config, url, "/tmp/dest")).NotTo(BeNil())
+			Expect(utils.GetSource(*config, url, "/tmp/dest")).NotTo(BeNil())
 			client.WasGetCalledWith(url)
 		})
 		It("Copies local file to destination", func() {
 			fs.Create("/tmp/file")
-			Expect(utils.GetSource(config, "file:///tmp/file", "/tmp/dest")).To(BeNil())
+			Expect(utils.GetSource(*config, "file:///tmp/file", "/tmp/dest")).To(BeNil())
 			_, err := fs.Stat("/tmp/dest")
 			Expect(err).To(BeNil())
 		})
@@ -958,7 +958,7 @@ var _ = Describe("Utils", Label("utils"), func() {
 			}
 			err := mounter.Mount("/some/device", "/some/mountpoint", "auto", []string{})
 			Expect(err).ShouldNot(HaveOccurred())
-			mnt, err := utils.IsMounted(config, part)
+			mnt, err := utils.IsMounted(*config, part)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(mnt).To(BeTrue())
 		})
@@ -966,18 +966,18 @@ var _ = Describe("Utils", Label("utils"), func() {
 			part := &v1.Partition{
 				MountPoint: "/some/mountpoint",
 			}
-			mnt, err := utils.IsMounted(config, part)
+			mnt, err := utils.IsMounted(*config, part)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(mnt).To(BeFalse())
 		})
 		It("checks a partition without mountpoint", func() {
 			part := &v1.Partition{}
-			mnt, err := utils.IsMounted(config, part)
+			mnt, err := utils.IsMounted(*config, part)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(mnt).To(BeFalse())
 		})
 		It("checks a nil partitiont", func() {
-			mnt, err := utils.IsMounted(config, nil)
+			mnt, err := utils.IsMounted(*config, nil)
 			Expect(err).Should(HaveOccurred())
 			Expect(mnt).To(BeFalse())
 		})

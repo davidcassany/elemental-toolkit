@@ -308,7 +308,7 @@ func LoadEnvFile(fs v1.FS, file string) (map[string]string, error) {
 	return envMap, err
 }
 
-func IsMounted(config *v1.Config, part *v1.Partition) (bool, error) {
+func IsMounted(config v1.Config, part *v1.Partition) (bool, error) {
 	if part == nil {
 		return false, fmt.Errorf("nil partition")
 	}
@@ -329,7 +329,7 @@ func IsMounted(config *v1.Config, part *v1.Partition) (bool, error) {
 // It will respect TMPDIR and use that if exists, fallback to try the persistent partition if its mounted
 // and finally the default /tmp/ dir
 // suffix is what is appended to the dir name elemental-suffix. If empty it will randomly generate a number
-func GetTempDir(config *v1.Config, suffix string) string {
+func GetTempDir(config v1.Config, suffix string) string {
 	// if we got a TMPDIR var, respect and use that
 	if suffix == "" {
 		random := rand.New(rand.NewSource(time.Now().UnixNano()))
@@ -396,7 +396,7 @@ func IsHTTPURI(uri string) (bool, error) {
 
 // GetSource copies given source to destination, if source is a local path it simply
 // copies files, if source is a remote URL it tries to download URL to destination.
-func GetSource(config *v1.Config, source string, destination string) error {
+func GetSource(config v1.Config, source string, destination string) error {
 	local, err := IsLocalURI(source)
 	if err != nil {
 		config.Logger.Errorf("Not a valid url: %s", source)

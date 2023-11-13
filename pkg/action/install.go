@@ -149,13 +149,12 @@ func (i *InstallAction) createInstallStateYaml(sysMeta, recMeta interface{}) err
 
 // InstallRun will install the system from a given configuration
 func (i InstallAction) Run() (err error) {
-	e := elemental.NewElemental(&i.cfg.Config)
 	cleanup := utils.NewCleanStack()
 	defer func() { err = cleanup.Cleanup(err) }()
 
 	// Set installation sources from a downloaded ISO
 	if i.spec.Iso != "" {
-		isoCleaner, err := e.UpdateSourceFormISO(i.spec.Iso, &i.spec.Active)
+		isoCleaner, err := elemental.UpdateSourceFormISO(i.cfg.Config, i.spec.Iso, &i.spec.Active)
 		cleanup.Push(isoCleaner)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.Unknown)
@@ -163,17 +162,17 @@ func (i InstallAction) Run() (err error) {
 	}
 
 	// Partition and format device if needed
-	err = i.prepareDevice(e)
+	err = i.prepareDevice()
 	if err != nil {
 		return err
 	}
 
-	err = e.MountPartitions(i.spec.Partitions.PartitionsByMountPoint(false))
+	err = elemental.MountPartitions(i.cfg.Config, i.spec.Partitions.PartitionsByMountPoint(false))
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.MountPartitions)
 	}
 	cleanup.Push(func() error {
-		return e.UnmountPartitions(i.spec.Partitions.PartitionsByMountPoint(true))
+		return elemental.UnmountPartitions(i.cfg.Config, i.spec.Partitions.PartitionsByMountPoint(true))
 	})
 
 	//TODO init snapshotter
@@ -187,14 +186,14 @@ func (i InstallAction) Run() (err error) {
 	// TODO set workingImgDir
 
 	// Deploy active image
-	systemMeta, treeCleaner, err := e.DeployImgTree(&i.spec.Active, cnst.WorkingImgDir)
+	systemMeta, treeCleaner, err := elemental.DeployImgTree(i.cfg.Config, &i.spec.Active, cnst.WorkingImgDir)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.DeployImgTree)
 	}
 	cleanup.Push(func() error { return treeCleaner() })
 
 	// Copy cloud-init if any
-	err = e.CopyCloudConfig(i.spec.Partitions.GetConfigStorage(), i.spec.CloudInit)
+	err = elemental.CopyCloudConfig(i.cfg.Config, i.spec.Partitions.GetConfigStorage(), i.spec.CloudInit)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.CopyFile)
 	}
@@ -209,7 +208,7 @@ func (i InstallAction) Run() (err error) {
 	}
 
 	// Relabel SELinux
-	err = i.applySelinuxLabels(e)
+	err = i.applySelinuxLabels()
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.SelinuxRelabel)
 	}
@@ -243,7 +242,7 @@ func (i InstallAction) Run() (err error) {
 		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
 	}
 
-	err = e.CreateImgFromTree(cnst.WorkingImgDir, &i.spec.Active, false, treeCleaner)
+	err = elemental.CreateImgFromTree(i.cfg.Config, cnst.WorkingImgDir, &i.spec.Active, false, treeCleaner)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.CreateImgFromTree)
 	}
@@ -252,12 +251,12 @@ func (i InstallAction) Run() (err error) {
 	var recoveryMeta interface{}
 	if i.spec.Recovery.Source.IsFile() && i.spec.Active.File == i.spec.Recovery.Source.Value() && i.spec.Active.FS == i.spec.Recovery.FS {
 		// Reuse image file from active image
-		err := e.CopyFileImg(&i.spec.Recovery)
+		err := elemental.CopyFileImg(i.cfg.Config, &i.spec.Recovery)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.CopyFileImg)
 		}
 	} else {
-		recoveryMeta, err = e.DeployImage(&i.spec.Recovery)
+		recoveryMeta, err = elemental.DeployImage(i.cfg.Config, &i.spec.Recovery)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.DeployImage)
 		}
@@ -265,7 +264,7 @@ func (i InstallAction) Run() (err error) {
 
 	// TODO no passive installation
 	// Install Passive
-	err = e.CopyFileImg(&i.spec.Passive)
+	err = elemental.CopyFileImg(i.cfg.Config, &i.spec.Passive)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.DeployImage)
 	}
@@ -300,31 +299,31 @@ func (i InstallAction) Run() (err error) {
 }
 
 // applySelinuxLabels sets SELinux extended attributes to the root-tree being installed
-func (i *InstallAction) applySelinuxLabels(e *elemental.Elemental) error {
+func (i *InstallAction) applySelinuxLabels() error {
 	binds := map[string]string{}
-	if mnt, _ := utils.IsMounted(&i.cfg.Config, i.spec.Partitions.Persistent); mnt {
+	if mnt, _ := utils.IsMounted(i.cfg.Config, i.spec.Partitions.Persistent); mnt {
 		binds[i.spec.Partitions.Persistent.MountPoint] = cnst.UsrLocalPath
 	}
-	if mnt, _ := utils.IsMounted(&i.cfg.Config, i.spec.Partitions.OEM); mnt {
+	if mnt, _ := utils.IsMounted(i.cfg.Config, i.spec.Partitions.OEM); mnt {
 		binds[i.spec.Partitions.OEM.MountPoint] = cnst.OEMPath
 	}
 	return utils.ChrootedCallback(
-		&i.cfg.Config, cnst.WorkingImgDir, binds, func() error { return e.SelinuxRelabel("/", true) },
+		&i.cfg.Config, cnst.WorkingImgDir, binds, func() error { return elemental.SelinuxRelabel(i.cfg.Config, "/", true) },
 	)
 }
 
-func (i *InstallAction) prepareDevice(e *elemental.Elemental) error {
+func (i *InstallAction) prepareDevice() error {
 	if i.spec.NoFormat {
 		// Check force flag against current device
 		labels := []string{i.spec.Active.Label, i.spec.Recovery.Label}
-		if e.CheckActiveDeployment(labels) && !i.spec.Force {
+		if elemental.CheckActiveDeployment(i.cfg.Config, labels) && !i.spec.Force {
 			return elementalError.New("use `force` flag to run an installation over the current running deployment", elementalError.AlreadyInstalled)
 		}
 	} else {
 		// Deactivate any active volume on target
-		e.DeactivateDevices()
+		elemental.DeactivateDevices(i.cfg.Config)
 		// Partition device
-		err := e.PartitionAndFormatDevice(i.spec)
+		err := elemental.PartitionAndFormatDevice(i.cfg.Config, i.spec)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.PartitioningDevice)
 		}
