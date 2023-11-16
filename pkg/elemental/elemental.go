@@ -29,6 +29,10 @@ import (
 	"github.com/rancher/elemental-toolkit/pkg/utils"
 )
 
+// elemental package inclues a collection of helper methods to run elemental specific
+// operations such as creating, formatting and mounting images or partitions and similar
+// high level operations
+
 // FormatPartition will format an already existing partition
 func FormatPartition(c v1.Config, part *v1.Partition, opts ...string) error {
 	c.Logger.Infof("Formatting '%s' partition", part.Name)
@@ -198,87 +202,100 @@ func UnmountPartition(c v1.Config, part *v1.Partition) error {
 	return c.Mounter.Unmount(part.MountPoint)
 }
 
-// MountImage mounts an image with the given mount options
-func MountImage(c v1.Config, img *v1.Image, opts ...string) error {
-	c.Logger.Debugf("Mounting image %s to %s", img.Label, img.MountPoint)
-	err := utils.MkdirAll(c.Fs, img.MountPoint, cnst.DirPerm)
-	if err != nil {
-		c.Logger.Errorf("Failed creating mountpoint %s", img.MountPoint)
-		return err
-	}
+// MountFileSystemImage mounts an image with the given mount options
+func MountFileSystemImage(c v1.Config, img *v1.Image, opts ...string) error {
+	c.Logger.Debugf("Mounting image %s to %s", img.File, img.MountPoint)
 	out, err := c.Runner.Run("losetup", "--show", "-f", img.File)
 	if err != nil {
-		c.Logger.Errorf("Failed setting a loop device for %s", img.File)
+		c.Logger.Errorf("failed setting a loop device for %s", img.File)
 		return err
 	}
 	loop := strings.TrimSpace(string(out))
+	c.Logger.Debugf("Loopdevice for %s set to %s", img.File, loop)
 	err = c.Mounter.Mount(loop, img.MountPoint, "auto", opts)
 	if err != nil {
-		c.Logger.Errorf("Failed to mount %s", loop)
-		_, _ = c.Runner.Run("losetup", "-d", loop)
+		c.Logger.Errorf("failed to mount %s", loop)
+		c.Runner.RunNoError("losetup", "-d", loop)
 		return err
 	}
 	img.LoopDevice = loop
 	return nil
 }
 
-// UnmountImage unmounts the given image or does nothing if not mounted
-func UnmountImage(c v1.Config, img *v1.Image) error {
-	// Using IsLikelyNotMountPoint seams to be safe as we are not checking
-	// for bind mounts here
+// UmountFileSystemImage unmounts the given image or does nothing if not mounted
+func UmountFileSystemImage(c v1.Config, img *v1.Image) error {
 	if notMnt, _ := c.Mounter.IsLikelyNotMountPoint(img.MountPoint); notMnt {
 		c.Logger.Debugf("Not unmounting image, %s doesn't look like mountpoint", img.MountPoint)
 		return nil
 	}
 
-	c.Logger.Debugf("Unmounting image %s from %s", img.Label, img.MountPoint)
+	loop := img.LoopDevice
+	img.LoopDevice = ""
+
+	c.Logger.Debugf("Unmounting image from %s", img.MountPoint)
 	err := c.Mounter.Unmount(img.MountPoint)
 	if err != nil {
+		c.Runner.RunNoError("losetup", "-d", loop)
 		return err
 	}
-	_, err = c.Runner.Run("losetup", "-d", img.LoopDevice)
-	img.LoopDevice = ""
+	_, err = c.Runner.Run("losetup", "-d", loop)
 	return err
 }
 
-// CreateFileSystemImage creates the image file for the given image
-func CreateFileSystemImage(c v1.Config, img *v1.Image) error {
-	return CreatePreLoadedFileSystemImage(c, img, "")
-}
-
-// CreatePreLoadedFileSystemImage creates the image file for the given image including the contents of the rootDir.
-// If rootDir is empty it simply creates an empty filesystem image
-func CreatePreLoadedFileSystemImage(c v1.Config, img *v1.Image, rootDir string) error {
-	c.Logger.Infof("Creating filesystem image %s with size: %d", img.File, img.Size)
+// CreateFileSystemImage creates the image file for the given image, rootDir is used to compute the image
+// size and preload boolean is to create the FS with preloaded rootDir (only for ext2-4)
+func CreateFileSystemImage(c v1.Config, img *v1.Image, rootDir string, preload bool) error {
+	c.Logger.Infof("Creating image %s", img.File)
+	if img.Size == 0 && rootDir != "" {
+		size, err := utils.DirSizeMB(c.Fs, rootDir)
+		if err != nil {
+			return err
+		}
+		img.Size = size + cnst.ImgOverhead
+		c.Logger.Debugf("Image size %dM", img.Size)
+	}
 	err := utils.MkdirAll(c.Fs, filepath.Dir(img.File), cnst.DirPerm)
 	if err != nil {
+		c.Logger.Errorf("failed creatin target file directory path: %v", err)
 		return err
 	}
 
 	err = utils.CreateRAWFile(c.Fs, img.File, img.Size)
 	if err != nil {
+		c.Logger.Errorf("failed creating raw file %s", img.File)
 		return err
 	}
 
-	var extraOpts []string
-
-	// Only add the rootDir if it's not empty
-	match, _ := regexp.MatchString("ext[2-4]", img.FS)
-	exists, _ := utils.Exists(c.Fs, rootDir)
-	if !match && exists {
-		c.Logger.Infof("Pre-loaded image creation is only available for ext[2-4] filesystems, ignoring options for %s", img.FS)
-	}
-	if exists && match {
+	extraOpts := []string{}
+	r := regexp.MustCompile("ext[2-4]")
+	match := r.MatchString(img.FS)
+	if preload && match {
 		extraOpts = []string{"-d", rootDir}
 	}
-
+	if preload && !match {
+		c.Logger.Errorf("Preloaded filesystem images are only supported for ext2-4 filesystems")
+		return fmt.Errorf("unexpected filesystem: %s", img.FS)
+	}
 	mkfs := partitioner.NewMkfsCall(img.File, img.FS, img.Label, c.Runner, extraOpts...)
 	_, err = mkfs.Apply()
 	if err != nil {
+		c.Logger.Errorf("failed formatting file %s with %s", img.File, img.FS)
 		_ = c.Fs.RemoveAll(img.File)
 		return err
 	}
 	return nil
+}
+
+// CreateSimpleFileSystemImage creates the image file for the given image
+func CreateSimpleFileSystemImage(c v1.Config, img *v1.Image) error {
+	return CreateFileSystemImage(c, img, "", false)
+}
+
+// CreatePreLoadedFileSystemImage creates the image file for the given image including the contents of the rootDir.
+// If rootDir is empty it simply creates an empty filesystem image
+func CreatePreLoadedFileSystemImage(c v1.Config, img *v1.Image, rootDir string) error {
+	preload, _ := utils.Exists(c.Fs, rootDir)
+	return CreateFileSystemImage(c, img, rootDir, preload)
 }
 
 // DeployImgTree will deploy the given image into the given root tree. Returns source metadata in info,
@@ -320,18 +337,13 @@ func DeployImgTree(c v1.Config, img *v1.Image, root string) (info interface{}, c
 		_ = cleaner()
 		return nil, nil, err
 	}
-	err = utils.CreateDirStructure(c.Fs, root)
-	if err != nil {
-		_ = cleaner()
-		return nil, nil, err
-	}
 
 	return info, cleaner, err
 }
 
 // CreateImgFromTree creates the given image from with the contents of the tree for the given root.
 // NoMount flag allows formatting an image including its contents (experimental and ext* specific)
-func CreateImgFromTree(c v1.Config, root string, img *v1.Image, noMount bool, cleaner func() error) (err error) {
+/*func CreateImgFromTree(c v1.Config, root string, img *v1.Image, noMount bool, cleaner func() error) (err error) {
 	if cleaner != nil {
 		defer func() {
 			cErr := cleaner()
@@ -341,56 +353,10 @@ func CreateImgFromTree(c v1.Config, root string, img *v1.Image, noMount bool, cl
 		}()
 	}
 
-	var preLoadRoot string
-	if noMount {
-		preLoadRoot = root
-	}
+	err = CreateImageFromTree(c, img, root, noMount)
 
-	if img.FS == cnst.SquashFs {
-		c.Logger.Infof("Creating squashed image: %s", img.File)
-		err = utils.MkdirAll(c.Fs, filepath.Dir(img.File), cnst.DirPerm)
-		if err != nil {
-			c.Logger.Errorf("failed creating destination folder: %s", err.Error())
-			return err
-		}
-		squashOptions := append(cnst.GetDefaultSquashfsOptions(), c.SquashFsCompressionConfig...)
-		err = utils.CreateSquashFS(c.Runner, c.Logger, root, img.File, squashOptions)
-		if err != nil {
-			return err
-		}
-	} else {
-		if img.Size == 0 {
-			size, err := utils.DirSizeMB(c.Fs, root)
-			if err != nil {
-				return err
-			}
-			img.Size = size + cnst.ImgOverhead
-		}
-		err = CreatePreLoadedFileSystemImage(c, img, preLoadRoot)
-		if err != nil {
-			return err
-		}
-
-		if !noMount {
-			err = MountImage(c, img, "rw")
-			if err != nil {
-				return err
-			}
-			defer func() {
-				mErr := UnmountImage(c, img)
-				if err == nil && mErr != nil {
-					err = mErr
-				}
-			}()
-			c.Logger.Infof("Sync %s to %s", root, img.MountPoint)
-			err = utils.SyncData(c.Logger, c.Runner, c.Fs, root, img.MountPoint)
-			if err != nil {
-				return err
-			}
-		}
-	}
 	return err
-}
+}*/
 
 // CopyFileImg copies the files target as the source of this image. It also applies the img label over the copied image.
 func CopyFileImg(c v1.Config, img *v1.Image) error {
@@ -425,8 +391,13 @@ func DeployImage(c v1.Config, img *v1.Image) (interface{}, error) {
 		return nil, err
 	}
 
-	err = CreateImgFromTree(c, cnst.WorkingImgDir, img, false, cleaner)
+	err = CreateImageFromTree(c, img, cnst.WorkingImgDir, false)
 	if err != nil {
+		return nil, err
+	}
+	err = cleaner()
+	if err != nil {
+		c.Logger.Errorf("failed cleaning deployed image tree: %v", err)
 		return nil, err
 	}
 	return info, nil
@@ -471,11 +442,11 @@ func DumpSource(c v1.Config, target string, imgSrc *v1.ImageSource) (info interf
 			return nil, err
 		}
 		img := &v1.Image{File: imgSrc.Value(), MountPoint: cnst.ImgSrcDir}
-		err = MountImage(c, img, "auto", "ro")
+		err = MountFileSystemImage(c, img, "auto", "ro")
 		if err != nil {
 			return nil, err
 		}
-		defer UnmountImage(c, img) // nolint:errcheck
+		defer UmountFileSystemImage(c, img) // nolint:errcheck
 		excludes := []string{"/mnt", "/proc", "/sys", "/dev", "/tmp", "/host", "/run"}
 		err = utils.SyncData(c.Logger, c.Runner, c.Fs, cnst.ImgSrcDir, target, excludes...)
 		if err != nil {
@@ -483,6 +454,10 @@ func DumpSource(c v1.Config, target string, imgSrc *v1.ImageSource) (info interf
 		}
 	} else {
 		return nil, fmt.Errorf("unknown image source type")
+	}
+	err = utils.CreateDirStructure(c.Fs, target)
+	if err != nil {
+		return nil, err
 	}
 	c.Logger.Infof("Finished copying %s into %s", imgSrc.Value(), target)
 	return info, nil
@@ -533,28 +508,52 @@ func SelinuxRelabel(c v1.Config, rootDir string, raiseError bool) error {
 	return nil
 }
 
-// CheckActiveDeployment returns true if at least one of the provided filesystem labels is found within the system
-func CheckActiveDeployment(c v1.Config, labels []string) bool {
+// CheckActiveDeployment returns true if at least one of the mode sentinel files is found
+func CheckActiveDeployment(c v1.Config) bool {
 	c.Logger.Infof("Checking for active deployment")
 
-	for _, label := range labels {
-		found, _ := utils.GetDeviceByLabel(c.Runner, label, 1)
-		if found != "" {
-			c.Logger.Debug("there is already an active deployment in the system")
+	tests := []func(v1.Config) bool{IsActiveMode, IsPassiveMode, IsRecoveryMode}
+	for _, t := range tests {
+		if t(c) {
 			return true
 		}
+	}
+
+	return false
+}
+
+// IsActiveMode checks if the active mode sentinel file exists
+func IsActiveMode(c v1.Config) bool {
+	if ok, _ := utils.Exists(c.Fs, cnst.ActiveMode); ok {
+		return true
 	}
 	return false
 }
 
-// UpdateSourceISO downloads an ISO in a temporary folder, mounts it and updates active image to use the ISO squashfs image as
-// source. Returns a cleaner method to unmount and remove the temporary folder afterwards.
-func UpdateSourceFormISO(c v1.Config, iso string, activeImg *v1.Image) (func() error, error) {
+// IsPassiveMode checks if the passive mode sentinel file exists
+func IsPassiveMode(c v1.Config) bool {
+	if ok, _ := utils.Exists(c.Fs, cnst.PassiveMode); ok {
+		return true
+	}
+	return false
+}
+
+// IsRecoveryMode checks if the recovery mode sentinel file exists
+func IsRecoveryMode(c v1.Config) bool {
+	if ok, _ := utils.Exists(c.Fs, cnst.RecoveryMode); ok {
+		return true
+	}
+	return false
+}
+
+// SourceISO downloads an ISO in a temporary folder, mounts it and returns the image source to be used
+// Returns a source and cleaner method to unmount and remove the temporary folder afterwards.
+func SourceFormISO(c v1.Config, iso string) (*v1.ImageSource, func() error, error) {
 	nilErr := func() error { return nil }
 
 	tmpDir, err := utils.TempDir(c.Fs, "", "elemental")
 	if err != nil {
-		return nilErr, err
+		return nil, nilErr, err
 	}
 
 	cleanTmpDir := func() error { return c.Fs.RemoveAll(tmpDir) }
@@ -562,19 +561,19 @@ func UpdateSourceFormISO(c v1.Config, iso string, activeImg *v1.Image) (func() e
 	tmpFile := filepath.Join(tmpDir, "elemental.iso")
 	err = utils.GetSource(c, iso, tmpFile)
 	if err != nil {
-		return cleanTmpDir, err
+		return nil, cleanTmpDir, err
 	}
 
 	isoMnt := filepath.Join(tmpDir, "iso")
 	err = utils.MkdirAll(c.Fs, isoMnt, cnst.DirPerm)
 	if err != nil {
-		return cleanTmpDir, err
+		return nil, cleanTmpDir, err
 	}
 
 	c.Logger.Infof("Mounting iso %s into %s", tmpFile, isoMnt)
 	err = c.Mounter.Mount(tmpFile, isoMnt, "auto", []string{"loop"})
 	if err != nil {
-		return cleanTmpDir, err
+		return nil, cleanTmpDir, err
 	}
 
 	cleanAll := func() error {
@@ -588,11 +587,10 @@ func UpdateSourceFormISO(c v1.Config, iso string, activeImg *v1.Image) (func() e
 	squashfsImg := filepath.Join(isoMnt, cnst.ISORootFile)
 	ok, _ := utils.Exists(c.Fs, squashfsImg)
 	if !ok {
-		return cleanAll, fmt.Errorf("squashfs image not found in ISO: %s", squashfsImg)
+		return nil, cleanAll, fmt.Errorf("squashfs image not found in ISO: %s", squashfsImg)
 	}
-	activeImg.Source = v1.NewFileSrc(squashfsImg)
 
-	return cleanAll, nil
+	return v1.NewFileSrc(squashfsImg), cleanAll, nil
 }
 
 // DeactivateDevice deactivates unmounted the block devices present within the system.
@@ -603,4 +601,42 @@ func DeactivateDevices(c v1.Config) {
 		"blkdeactivate", "--lvmoptions", "retry,wholevg",
 		"--dmoptions", "force,retry", "--errors",
 	)
+}
+
+func CreateImageFromTree(c v1.Config, img *v1.Image, rootDir string, preload bool) (err error) {
+	if img.FS == cnst.SquashFs {
+		c.Logger.Infof("Creating squashfs image for file %s", img.File)
+
+		squashOptions := append(cnst.GetDefaultSquashfsOptions(), c.SquashFsCompressionConfig...)
+		err = utils.CreateSquashFS(c.Runner, c.Logger, rootDir, img.File, squashOptions)
+		if err != nil {
+			return err
+		}
+	} else {
+		err = CreateFileSystemImage(c, img, rootDir, preload)
+		if err != nil {
+			c.Logger.Errorf("failed creating filesystem image: %v", err)
+			return err
+		}
+		if !preload {
+			err = MountFileSystemImage(c, img, "rw")
+			if err != nil {
+				c.Logger.Errorf("failed mounting filesystem image: %v", err)
+				return err
+			}
+			defer func() {
+				mErr := UmountFileSystemImage(c, img)
+				if err == nil && mErr != nil {
+					err = mErr
+				}
+			}()
+
+			c.Logger.Infof("Sync %s to %s", rootDir, img.MountPoint)
+			err = utils.SyncData(c.Logger, c.Runner, c.Fs, rootDir, img.MountPoint)
+			if err != nil {
+				return err
+			}
+		}
+	}
+	return err
 }

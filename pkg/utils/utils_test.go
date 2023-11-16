@@ -711,14 +711,14 @@ var _ = Describe("Utils", Label("utils"), func() {
 			Expect(utils.MkdirAll(fs, rootDir, constants.DirPerm)).To(Succeed())
 
 			// The target file of all symlinks
-			file = "/path/with/needle/findme.extension"
+			file = "/path/with/subdir/findme.extension"
 			Expect(utils.MkdirAll(fs, filepath.Join(rootDir, filepath.Dir(file)), constants.DirPerm)).To(Succeed())
 			Expect(fs.WriteFile(filepath.Join(rootDir, file), []byte("some data"), constants.FilePerm)).To(Succeed())
 
 			// A symlink pointing to a relative path
 			relSymlink = "/path/to/symlink/pointing-to-file"
 			Expect(utils.MkdirAll(fs, filepath.Join(rootDir, filepath.Dir(relSymlink)), constants.DirPerm)).To(Succeed())
-			Expect(fs.Symlink("../../with/needle/findme.extension", filepath.Join(rootDir, relSymlink))).To(Succeed())
+			Expect(fs.Symlink("../../with/subdir/findme.extension", filepath.Join(rootDir, relSymlink))).To(Succeed())
 
 			// A symlink pointing to an absolute path
 			absSymlink = "/path/to/symlink/absolute-pointer"
@@ -727,13 +727,13 @@ var _ = Describe("Utils", Label("utils"), func() {
 
 			// A bunch of nested symlinks
 			nestSymlink = "/path/to/symlink/nested-pointer"
-			nestFst := "/path/to/symlink/nestFst"
+			nest1st := "/path/to/symlink/nest1st"
 			nest2nd := "/path/to/nest2nd"
 			nest3rd := "/path/with/nest3rd"
-			Expect(fs.Symlink("nestFst", filepath.Join(rootDir, nestSymlink))).To(Succeed())
-			Expect(fs.Symlink(nest2nd, filepath.Join(rootDir, nestFst))).To(Succeed())
+			Expect(fs.Symlink("nest1st", filepath.Join(rootDir, nestSymlink))).To(Succeed())
+			Expect(fs.Symlink(nest2nd, filepath.Join(rootDir, nest1st))).To(Succeed())
 			Expect(fs.Symlink("../with/nest3rd", filepath.Join(rootDir, nest2nd))).To(Succeed())
-			Expect(fs.Symlink("./needle/findme.extension", filepath.Join(rootDir, nest3rd))).To(Succeed())
+			Expect(fs.Symlink("./subdir/findme.extension", filepath.Join(rootDir, nest3rd))).To(Succeed())
 
 			// A broken symlink
 			brokenSymlink = "/path/to/symlink/broken"
@@ -742,39 +742,31 @@ var _ = Describe("Utils", Label("utils"), func() {
 
 		It("resolves a simple relative symlink", func() {
 			systemPath := filepath.Join(rootDir, relSymlink)
-			f, err := fs.Lstat(systemPath)
-			Expect(err).To(BeNil())
-			Expect(utils.ResolveLink(fs, systemPath, rootDir, utils.DirEntryFromFileInfo(f), 4)).To(Equal(filepath.Join(rootDir, file)))
+			Expect(utils.ResolveLink(fs, systemPath, rootDir)).To(Equal(filepath.Join(rootDir, file)))
 		})
 
 		It("resolves a simple absolute symlink", func() {
 			systemPath := filepath.Join(rootDir, absSymlink)
-			f, err := fs.Lstat(systemPath)
-			Expect(err).To(BeNil())
-			Expect(utils.ResolveLink(fs, systemPath, rootDir, utils.DirEntryFromFileInfo(f), 4)).To(Equal(filepath.Join(rootDir, file)))
+			Expect(utils.ResolveLink(fs, systemPath, rootDir)).To(Equal(filepath.Join(rootDir, file)))
 		})
 
 		It("resolves some nested symlinks", func() {
 			systemPath := filepath.Join(rootDir, nestSymlink)
-			f, err := fs.Lstat(systemPath)
-			Expect(err).To(BeNil())
-			Expect(utils.ResolveLink(fs, systemPath, rootDir, utils.DirEntryFromFileInfo(f), 4)).To(Equal(filepath.Join(rootDir, file)))
+			Expect(utils.ResolveLink(fs, systemPath, rootDir)).To(Equal(filepath.Join(rootDir, file)))
 		})
 
 		It("does not resolve broken links", func() {
 			systemPath := filepath.Join(rootDir, brokenSymlink)
-			f, err := fs.Lstat(systemPath)
-			Expect(err).To(BeNil())
 			// Return the symlink path without resolving it
-			Expect(utils.ResolveLink(fs, systemPath, rootDir, utils.DirEntryFromFileInfo(f), 4)).To(Equal(systemPath))
+			Expect(utils.ResolveLink(fs, systemPath, rootDir)).To(Equal(systemPath))
 		})
 
 		It("does not resolve too many levels of netsed links", func() {
-			systemPath := filepath.Join(rootDir, nestSymlink)
-			f, err := fs.Lstat(systemPath)
-			Expect(err).To(BeNil())
+			preNest := "/path/with/preNested"
+			systemPath := filepath.Join(rootDir, preNest)
+			Expect(fs.Symlink(nestSymlink, systemPath)).To(Succeed())
 			// Returns the symlink resolution up to the second level
-			Expect(utils.ResolveLink(fs, systemPath, rootDir, utils.DirEntryFromFileInfo(f), 2)).To(Equal(filepath.Join(rootDir, "/path/to/nest2nd")))
+			Expect(utils.ResolveLink(fs, systemPath, rootDir)).To(Equal(filepath.Join(rootDir, "/path/with/nest3rd")))
 		})
 	})
 	Describe("FindFile", func() {
@@ -997,7 +989,7 @@ var _ = Describe("Utils", Label("utils"), func() {
 			cleaner.Push(callback)
 			poppedJob := cleaner.Pop()
 			Expect(poppedJob).NotTo(BeNil())
-			poppedJob()
+			_ = poppedJob.Run()
 			Expect(flag).To(BeTrue())
 		})
 		It("On Cleanup runs callback stack in reverse order", func() {

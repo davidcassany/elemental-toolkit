@@ -94,6 +94,11 @@ const (
 	WorkingImgDir   = "/run/cos/workingtree"
 	RunningStateDir = "/run/initramfs/cos-state" // TODO: converge this constant with StateDir/RecoveryDir in dracut module from cos-toolkit
 
+	// Running mode sentinel files
+	ActiveMode   = "/run/cos/active_mode"
+	PassiveMode  = "/run/cos/passive_mode"
+	RecoveryMode = "/run/cos/recovery_mode"
+
 	// Live image mountpoints
 	ISOBaseTree = "/run/rootfsbase"
 	LiveDir     = "/run/initramfs/live"

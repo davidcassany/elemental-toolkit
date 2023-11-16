@@ -262,9 +262,14 @@ func (r ResetAction) Run() (err error) {
 		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
 	}
 
-	err = elemental.CreateImgFromTree(r.cfg.Config, cnst.WorkingImgDir, &r.spec.Active, false, treeCleaner)
+	err = elemental.CreateImageFromTree(r.cfg.Config, &r.spec.Active, cnst.WorkingImgDir, false)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.CreateImgFromTree)
+	}
+	err = treeCleaner()
+	if err != nil {
+		r.cfg.Config.Logger.Errorf("failed cleaning active root tree: %v", err)
+		return err
 	}
 
 	// Install Passive

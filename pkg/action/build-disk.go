@@ -243,33 +243,39 @@ func (b *BuildDiskAction) BuildDiskRun() (err error) { //nolint:gocyclo
 	// Create OS images
 	if !b.spec.Expandable {
 		// Create active image
-		err = elemental.CreateImgFromTree(b.cfg.Config, activeRoot, &b.spec.Active, b.spec.Unprivileged, nil)
+		err = elemental.CreateImageFromTree(b.cfg.Config, &b.spec.Active, activeRoot, b.spec.Unprivileged)
 		if err != nil {
 			b.cfg.Logger.Errorf("failed creating active image from root-tree: %s", err.Error())
 			return err
 		}
 
 		// Create passive image
-		err = elemental.CreateImgFromTree(b.cfg.Config, activeRoot, &b.spec.Passive, b.spec.Unprivileged, nil)
+		err = elemental.CreateImageFromTree(b.cfg.Config, &b.spec.Passive, activeRoot, b.spec.Unprivileged)
 		if err != nil {
 			b.cfg.Logger.Errorf("failed creating passive image from root-tree: %s", err.Error())
 			return err
 		}
 	}
 
-	// Create recovery image and removes recovery and active roots when done
-	err = elemental.CreateImgFromTree(
-		b.cfg.Config, recRoot, &b.spec.Recovery, b.spec.Unprivileged,
-		func() error {
-			cErr := b.cfg.Fs.RemoveAll(recRoot)
-			if cErr == nil {
-				cErr = b.cfg.Fs.RemoveAll(activeRoot)
-			}
-			return cErr
-		},
+	// Create recovery image
+	err = elemental.CreateImageFromTree(
+		b.cfg.Config, &b.spec.Recovery, recRoot, b.spec.Unprivileged,
 	)
 	if err != nil {
 		b.cfg.Logger.Errorf("failed creating recovery image from root-tree: %s", err.Error())
+		return err
+	}
+
+	// recRoot and activeRoot are no longer needed, we can delete them
+	err = b.cfg.Fs.RemoveAll(recRoot)
+	if err != nil {
+		b.cfg.Logger.Errorf("failed removing recovery root after image creation: %v", err)
+		return err
+	}
+
+	err = b.cfg.Fs.RemoveAll(activeRoot)
+	if err != nil {
+		b.cfg.Logger.Errorf("failed removing active root after image creation: %v", err)
 		return err
 	}
 
@@ -367,7 +373,7 @@ func (b *BuildDiskAction) CreatePartitionImages() ([]*v1.Image, error) {
 
 	b.cfg.Logger.Infof("Creating EFI partition image")
 	img = b.spec.Partitions.EFI.ToImage()
-	err = elemental.CreateFileSystemImage(b.cfg.Config, img)
+	err = elemental.CreateSimpleFileSystemImage(b.cfg.Config, img)
 	if err != nil {
 		b.cfg.Logger.Errorf("failed creating EFI image: %s", err.Error())
 		return nil, err
@@ -400,12 +406,17 @@ func (b *BuildDiskAction) CreatePartitionImages() ([]*v1.Image, error) {
 	for _, part := range b.spec.Partitions.PartitionsByInstallOrder(v1.PartitionList{}, excludes...) {
 		b.cfg.Logger.Infof("Creating %s partition image", part.Name)
 		img = part.ToImage()
-		err = elemental.CreateImgFromTree(
-			b.cfg.Config, b.roots[part.Name], img, b.spec.Unprivileged,
-			func() error { return b.cfg.Fs.RemoveAll(b.roots[part.Name]) },
+		err = elemental.CreateImageFromTree(
+			b.cfg.Config, img, b.roots[part.Name], b.spec.Unprivileged,
+			//func() error { return b.cfg.Fs.RemoveAll(b.roots[part.Name]) },
 		)
 		if err != nil {
 			b.cfg.Logger.Errorf("failed creating %s partition image: %s", part.Name, err.Error())
+			return nil, err
+		}
+		err = b.cfg.Fs.RemoveAll(b.roots[part.Name])
+		if err != nil {
+			b.cfg.Logger.Errorf("failed removing partition root tree %s: %v", b.roots[part.Name], err)
 			return nil, err
 		}
 		images = append(images, img)

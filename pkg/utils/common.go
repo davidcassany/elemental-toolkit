@@ -474,12 +474,16 @@ func findFile(vfs v1.FS, rootDir, pattern string) (string, error) {
 			if err != nil {
 				return err
 			}
+			f, err := d.Info()
+			if err != nil {
+				return err
+			}
 			match, err := filepath.Match(filepath.Join(rootDir, pattern), path)
 			if err != nil {
 				return err
 			}
 			if match {
-				foundFile = ResolveLink(vfs, path, rootDir, d, maxLinkDepth)
+				foundFile = resolveLink(vfs, path, rootDir, f, maxLinkDepth)
 				return io.EOF
 			}
 			return nil
@@ -553,16 +557,21 @@ func getBaseDir(path string) string {
 }
 
 // resolveLink attempts to resolve a symlink, if any. Returns the original given path
+// if not a symlink or if it can't be resolved. Only errors out on non existing paths (Lstat failure)
+// The given path must include the rootDir, rootDir is just used to evaluate the symlink
+func ResolveLink(vfs v1.FS, path string, rootDir string) (string, error) {
+	f, err := vfs.Lstat(path)
+	if err != nil {
+		return "", err
+	}
+	return resolveLink(vfs, path, rootDir, f, maxLinkDepth), nil
+}
+
+// resolveLink attempts to resolve a symlink, if any. Returns the original given path
 // if not a symlink or if it can't be resolved.
-func ResolveLink(vfs v1.FS, path string, rootDir string, d fs.DirEntry, depth int) string {
+func resolveLink(vfs v1.FS, path string, rootDir string, f fs.FileInfo, depth int) string {
 	var err error
 	var resolved string
-	var f fs.FileInfo
-
-	f, err = d.Info()
-	if err != nil {
-		return path
-	}
 
 	if f.Mode()&os.ModeSymlink == os.ModeSymlink && depth > 0 {
 		resolved, err = readlink(vfs, path)
@@ -573,7 +582,7 @@ func ResolveLink(vfs v1.FS, path string, rootDir string, d fs.DirEntry, depth in
 				resolved = filepath.Join(rootDir, resolved)
 			}
 			if f, err = vfs.Lstat(resolved); err == nil {
-				return ResolveLink(vfs, resolved, rootDir, &statDirEntry{f}, depth-1)
+				return resolveLink(vfs, resolved, rootDir, f, depth-1)
 			}
 		}
 	}

@@ -23,8 +23,6 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/jaypipes/ghw/pkg/block"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/twpayne/go-vfs"
@@ -224,20 +222,20 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 
 		It("Mounts file system image", func() {
 			runner.ReturnValue = []byte("/dev/loop")
-			Expect(elemental.MountImage(*config, img)).To(BeNil())
+			Expect(elemental.MountFileSystemImage(*config, img)).To(BeNil())
 			Expect(img.LoopDevice).To(Equal("/dev/loop"))
 		})
 
 		It("Fails to set a loop device", Label("loop"), func() {
 			runner.ReturnError = errors.New("failed to set a loop device")
-			Expect(elemental.MountImage(*config, img)).NotTo(BeNil())
+			Expect(elemental.MountFileSystemImage(*config, img)).NotTo(BeNil())
 			Expect(img.LoopDevice).To(Equal(""))
 		})
 
 		It("Fails to mount a loop device", Label("loop"), func() {
 			runner.ReturnValue = []byte("/dev/loop")
 			mounter.ErrorOnMount = true
-			Expect(elemental.MountImage(*config, img)).NotTo(BeNil())
+			Expect(elemental.MountFileSystemImage(*config, img)).NotTo(BeNil())
 			Expect(img.LoopDevice).To(Equal(""))
 		})
 	})
@@ -247,23 +245,23 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 		BeforeEach(func() {
 			runner.ReturnValue = []byte("/dev/loop")
 			img = &v1.Image{MountPoint: "/some/mountpoint"}
-			Expect(elemental.MountImage(*config, img)).To(BeNil())
+			Expect(elemental.MountFileSystemImage(*config, img)).To(BeNil())
 			Expect(img.LoopDevice).To(Equal("/dev/loop"))
 		})
 
 		It("Unmounts file system image", func() {
-			Expect(elemental.UnmountImage(*config, img)).To(BeNil())
+			Expect(elemental.UmountFileSystemImage(*config, img)).To(BeNil())
 			Expect(img.LoopDevice).To(Equal(""))
 		})
 
 		It("Fails to unmount a mountpoint", func() {
 			mounter.ErrorOnUnmount = true
-			Expect(elemental.UnmountImage(*config, img)).NotTo(BeNil())
+			Expect(elemental.UmountFileSystemImage(*config, img)).NotTo(BeNil())
 		})
 
 		It("Fails to unset a loop device", Label("loop"), func() {
 			runner.ReturnError = errors.New("failed to unset a loop device")
-			Expect(elemental.UnmountImage(*config, img)).NotTo(BeNil())
+			Expect(elemental.UmountFileSystemImage(*config, img)).NotTo(BeNil())
 		})
 	})
 
@@ -284,7 +282,7 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 		It("Creates a new file system image", func() {
 			_, err := fs.Stat(img.File)
 			Expect(err).NotTo(BeNil())
-			err = elemental.CreateFileSystemImage(*config, img)
+			err = elemental.CreateSimpleFileSystemImage(*config, img)
 			Expect(err).To(BeNil())
 			stat, err := fs.Stat(img.File)
 			Expect(err).To(BeNil())
@@ -295,7 +293,7 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 			runner.ReturnError = errors.New("run error")
 			_, err := fs.Stat(img.File)
 			Expect(err).NotTo(BeNil())
-			err = elemental.CreateFileSystemImage(*config, img)
+			err = elemental.CreateSimpleFileSystemImage(*config, img)
 			Expect(err).NotTo(BeNil())
 			_, err = fs.Stat(img.File)
 			Expect(err).NotTo(BeNil())
@@ -567,10 +565,8 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 	Describe("CreateImgFromTree", Label("createImg"), func() {
 		var imgFile, root string
 		var img *v1.Image
-		var cleaned bool
 
 		BeforeEach(func() {
-			cleaned = false
 			destDir, err := utils.TempDir(fs, "", "test")
 			Expect(err).ShouldNot(HaveOccurred())
 			root, err = utils.TempDir(fs, "", "test")
@@ -590,35 +586,29 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 			}
 		})
 		It("Creates an image including including the root tree contents", func() {
-			cleaner := func() error {
-				cleaned = true
-				return nil
-			}
-			err := elemental.CreateImgFromTree(*config, root, img, false, cleaner)
+			err := elemental.CreateImageFromTree(*config, img, root, false)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(img.Size).To(Equal(32 + constants.ImgOverhead + 1))
-			Expect(cleaned).To(BeTrue())
 		})
 		It("Creates an squashfs image", func() {
 			img.FS = constants.SquashFs
-			err := elemental.CreateImgFromTree(*config, root, img, false, nil)
+			err := elemental.CreateImageFromTree(*config, img, root, false)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(img.Size).To(Equal(uint(0)))
 			Expect(runner.IncludesCmds([][]string{{"mksquashfs"}}))
 		})
 		It("Creates an image of an specific size including including the root tree contents", func() {
 			img.Size = 64
-			err := elemental.CreateImgFromTree(*config, root, img, false, nil)
+			err := elemental.CreateImageFromTree(*config, img, root, false)
 			Expect(err).ShouldNot(HaveOccurred())
 			Expect(img.Size).To(Equal(uint(64)))
 			Expect(runner.IncludesCmds([][]string{{"rsync"}}))
 		})
 		It("Fails to mount created filesystem image", func() {
 			mounter.ErrorOnUnmount = true
-			err := elemental.CreateImgFromTree(*config, root, img, false, nil)
+			err := elemental.CreateImageFromTree(*config, img, root, false)
 			Expect(err).Should(HaveOccurred())
 			Expect(img.Size).To(Equal(32 + constants.ImgOverhead + 1))
-			Expect(cleaned).To(BeFalse())
 			Expect(runner.IncludesCmds([][]string{{"rsync"}}))
 		})
 	})
@@ -730,29 +720,27 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 		})
 	})
 	Describe("CheckActiveDeployment", Label("check"), func() {
-		It("deployment found", func() {
-			ghwTest := v1mock.GhwMock{}
-			disk := block.Disk{Name: "device", Partitions: []*block.Partition{
-				{
-					Name:            "device1",
-					FilesystemLabel: constants.ActiveLabel,
-				},
-			}}
-			ghwTest.AddDisk(disk)
-			ghwTest.CreateDevices()
-			defer ghwTest.Clean()
-			runner.ReturnValue = []byte(
-				fmt.Sprintf(
-					`{"blockdevices": [{"label": "%s", "type": "loop", "path": "/some/device"}]}`,
-					constants.ActiveLabel,
-				),
-			)
-			Expect(elemental.CheckActiveDeployment(*config, []string{constants.ActiveLabel, constants.PassiveLabel})).To(BeTrue())
+		BeforeEach(func() {
+			Expect(utils.MkdirAll(config.Fs, filepath.Dir(constants.ActiveMode), constants.DirPerm)).To(Succeed())
+		})
+		It("deployment found, if active system", func() {
+			_, err := config.Fs.Create(constants.ActiveMode)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(elemental.CheckActiveDeployment(*config)).To(BeTrue())
+		})
+		It("deployment found, if recovery system", func() {
+			_, err := config.Fs.Create(constants.RecoveryMode)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(elemental.CheckActiveDeployment(*config)).To(BeTrue())
+		})
+		It("deployment found, if passive system", func() {
+			_, err := config.Fs.Create(constants.PassiveMode)
+			Expect(err).NotTo(HaveOccurred())
+			Expect(elemental.CheckActiveDeployment(*config)).To(BeTrue())
 		})
 
-		It("Should not error out", func() {
-			runner.ReturnValue = []byte("")
-			Expect(elemental.CheckActiveDeployment(*config, []string{constants.ActiveLabel, constants.PassiveLabel})).To(BeFalse())
+		It("deployment not found", func() {
+			Expect(elemental.CheckActiveDeployment(*config)).To(BeFalse())
 		})
 	})
 	Describe("SelinuxRelabel", Label("SelinuxRelabel", "selinux"), func() {
@@ -841,10 +829,6 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 		})
 	})
 	Describe("GetIso", Label("GetIso", "iso"), func() {
-		var activeImg *v1.Image
-		BeforeEach(func() {
-			activeImg = &v1.Image{}
-		})
 		It("Gets the iso, mounts it and updates image source", func() {
 			tmpDir, err := utils.TempDir(fs, "", "elemental-test")
 			Expect(err).To(BeNil())
@@ -857,14 +841,14 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 			Expect(utils.MkdirAll(fs, filepath.Dir(rootfsImg), constants.DirPerm)).To(Succeed())
 			Expect(fs.WriteFile(rootfsImg, []byte{}, constants.FilePerm)).To(Succeed())
 
-			isoClean, err := elemental.UpdateSourceFormISO(*config, iso, activeImg)
+			source, isoClean, err := elemental.SourceFormISO(*config, iso)
 			Expect(err).To(BeNil())
-			Expect(activeImg.Source.IsFile()).To(BeTrue())
+			Expect(source.IsFile()).To(BeTrue())
 			Expect(isoClean()).To(Succeed())
 		})
 		It("Fails if it cant find the iso", func() {
 			iso := "whatever"
-			isoClean, err := elemental.UpdateSourceFormISO(*config, iso, activeImg)
+			_, isoClean, err := elemental.SourceFormISO(*config, iso)
 			Expect(err).ToNot(BeNil())
 			Expect(isoClean()).To(Succeed())
 		})
@@ -876,7 +860,7 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 			iso := fmt.Sprintf("%s/fake.iso", tmpDir)
 			config.Fs = vfs.NewReadOnlyFS(fs)
 
-			isoClean, err := elemental.UpdateSourceFormISO(*config, iso, activeImg)
+			_, isoClean, err := elemental.SourceFormISO(*config, iso)
 			Expect(err).ToNot(BeNil())
 			Expect(isoClean()).To(Succeed())
 		})
@@ -887,7 +871,7 @@ var _ = Describe("Elemental", Label("elemental"), func() {
 			err = fs.WriteFile(fmt.Sprintf("%s/fake.iso", tmpDir), []byte("Hi"), constants.FilePerm)
 			Expect(err).To(BeNil())
 			iso := fmt.Sprintf("%s/fake.iso", tmpDir)
-			isoClean, err := elemental.UpdateSourceFormISO(*config, iso, activeImg)
+			_, isoClean, err := elemental.SourceFormISO(*config, iso)
 			Expect(err).ToNot(BeNil())
 			Expect(err.Error()).To(ContainSubstring("mount error"))
 			Expect(isoClean()).To(Succeed())

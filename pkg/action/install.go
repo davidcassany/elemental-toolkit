@@ -154,11 +154,12 @@ func (i InstallAction) Run() (err error) {
 
 	// Set installation sources from a downloaded ISO
 	if i.spec.Iso != "" {
-		isoCleaner, err := elemental.UpdateSourceFormISO(i.cfg.Config, i.spec.Iso, &i.spec.Active)
+		source, isoCleaner, err := elemental.SourceFormISO(i.cfg.Config, i.spec.Iso)
 		cleanup.Push(isoCleaner)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.Unknown)
 		}
+		i.spec.Active.Source = source
 	}
 
 	// Partition and format device if needed
@@ -242,9 +243,14 @@ func (i InstallAction) Run() (err error) {
 		return elementalError.NewFromError(err, elementalError.SetDefaultGrubEntry)
 	}
 
-	err = elemental.CreateImgFromTree(i.cfg.Config, cnst.WorkingImgDir, &i.spec.Active, false, treeCleaner)
+	err = elemental.CreateImageFromTree(i.cfg.Config, &i.spec.Active, cnst.WorkingImgDir, false)
 	if err != nil {
 		return elementalError.NewFromError(err, elementalError.CreateImgFromTree)
+	}
+	err = treeCleaner()
+	if err != nil {
+		i.cfg.Config.Logger.Errorf("failed cleaning active image tree: %v", err)
+		return err
 	}
 
 	// Install Recovery
@@ -315,8 +321,7 @@ func (i *InstallAction) applySelinuxLabels() error {
 func (i *InstallAction) prepareDevice() error {
 	if i.spec.NoFormat {
 		// Check force flag against current device
-		labels := []string{i.spec.Active.Label, i.spec.Recovery.Label}
-		if elemental.CheckActiveDeployment(i.cfg.Config, labels) && !i.spec.Force {
+		if elemental.CheckActiveDeployment(i.cfg.Config) && !i.spec.Force {
 			return elementalError.New("use `force` flag to run an installation over the current running deployment", elementalError.AlreadyInstalled)
 		}
 	} else {

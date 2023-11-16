@@ -249,7 +249,7 @@ func (b BuildISOAction) createEFI(root string, img string) error {
 	align := int64(4 * 1024 * 1024)
 	efiSizeMB := (efiSize/align*align + align) / (1024 * 1024)
 
-	err = elemental.CreateFileSystemImage(b.cfg.Config, &v1.Image{
+	err = elemental.CreateSimpleFileSystemImage(b.cfg.Config, &v1.Image{
 		File:  img,
 		Size:  uint(efiSizeMB),
 		FS:    constants.EfiFs,

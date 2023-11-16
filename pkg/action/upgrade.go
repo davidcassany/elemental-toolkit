@@ -272,10 +272,15 @@ func (u *UpgradeAction) Run() (err error) {
 		}
 	}
 
-	err = elemental.CreateImgFromTree(u.config.Config, constants.WorkingImgDir, &upgradeImg, false, treeCleaner)
+	err = elemental.CreateImageFromTree(u.config.Config, &upgradeImg, constants.WorkingImgDir, false)
 	if err != nil {
 		u.Error("failed creating transition image")
 		return elementalError.NewFromError(err, elementalError.CreateImgFromTree)
+	}
+	err = treeCleaner()
+	if err != nil {
+		u.config.Logger.Errorf("failed cleaning upgrade image tree: %v", err)
+		return err
 	}
 
 	// If not upgrading recovery, backup active into passive

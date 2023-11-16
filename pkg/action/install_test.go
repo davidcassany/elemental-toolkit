@@ -98,10 +98,13 @@ var _ = Describe("Install action tests", func() {
 
 		BeforeEach(func() {
 			device = "/some/device"
-			err = utils.MkdirAll(fs, filepath.Dir(device), constants.DirPerm)
-			Expect(err).To(BeNil())
+			Expect(utils.MkdirAll(fs, filepath.Dir(device), constants.DirPerm)).To(Succeed())
 			_, err = fs.Create(device)
-			Expect(err).ShouldNot(HaveOccurred())
+			Expect(err).NotTo(HaveOccurred())
+
+			Expect(utils.MkdirAll(fs, filepath.Dir(constants.ActiveMode), constants.DirPerm)).To(Succeed())
+			_, err = fs.Create(constants.ActiveMode)
+			Expect(err).NotTo(HaveOccurred())
 
 			partNum := 0
 			partedOut := printOutput
@@ -307,6 +310,7 @@ var _ = Describe("Install action tests", func() {
 		})
 
 		It("Fails to install without formatting if a previous install is detected", Label("no-format", "disk"), func() {
+
 			spec.NoFormat = true
 			spec.Force = false
 			spec.Target = device
