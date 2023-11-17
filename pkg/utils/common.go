@@ -89,6 +89,8 @@ func CopyFile(fs v1.FS, source string, target string) error {
 // If target is a directory source is copied into that directory using
 // 1st source name file. The result keeps the file mode of the 1st source.
 func ConcatFiles(fs v1.FS, sources []string, target string) (err error) {
+	var targetFile *os.File
+
 	if len(sources) == 0 {
 		return fmt.Errorf("Empty sources list")
 	}
@@ -100,7 +102,7 @@ func ConcatFiles(fs v1.FS, sources []string, target string) (err error) {
 		return err
 	}
 
-	targetFile, err := fs.Create(target)
+	targetFile, err = fs.Create(target)
 	if err != nil {
 		return err
 	}
@@ -128,7 +130,8 @@ func ConcatFiles(fs v1.FS, sources []string, target string) (err error) {
 		}
 	}
 
-	return fs.Chmod(target, fInf.Mode())
+	err = fs.Chmod(target, fInf.Mode())
+	return err
 }
 
 // CreateDirStructure creates essentials directories under the root tree that might not be present
