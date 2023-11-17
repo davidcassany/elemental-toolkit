@@ -19,7 +19,9 @@ package features
 import (
 	"embed"
 	"fmt"
+	"io"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 
@@ -68,9 +70,9 @@ func New(name string, units []*systemd.Unit) *Feature {
 	}
 }
 
-func (f *Feature) Install(log v1.Logger, destFs v1.FS, runner v1.Runner) error {
+func (f *Feature) Install(log v1.Logger, destFs v1.FS, runner v1.Runner) (err error) {
 	featurePath := filepath.Join(embeddedRoot, f.Name)
-	err := fs.WalkDir(files, featurePath, func(path string, d fs.DirEntry, err error) error {
+	err = fs.WalkDir(files, featurePath, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			log.Errorf("Error accessing embedded file '%s': %s", path, err.Error())
 			return err
@@ -88,19 +90,7 @@ func (f *Feature) Install(log v1.Logger, destFs v1.FS, runner v1.Runner) error {
 		}
 		targetPath = filepath.Join("/", targetPath)
 
-		if err := utils.MkdirAll(destFs, filepath.Dir(targetPath), constants.DirPerm); err != nil {
-			log.Errorf("Error mkdir: %s", err.Error())
-			return err
-		}
-
-		content, err := files.ReadFile(path)
-		if err != nil {
-			log.Errorf("Error reading embedded file '%s': %s", path, err.Error())
-			return err
-		}
-
-		log.Debugf("Writing file '%s' to '%s'", path, targetPath)
-		return destFs.WriteFile(targetPath, content, 0755)
+		return f.copyEmbeddedFile(log, destFs, path, targetPath)
 	})
 	if err != nil {
 		log.Errorf("Error walking files for feature %s: %s", f.Name, err.Error())
@@ -161,4 +151,55 @@ func Get(names []string) ([]*Feature, error) {
 	}
 
 	return features, nil
+}
+
+func (f *Feature) copyEmbeddedFile(log v1.Logger, destFs v1.FS, path, targetPath string) (err error) {
+	var targetFile *os.File
+	var featFile fs.File
+	var fInfo fs.FileInfo
+
+	if err = utils.MkdirAll(destFs, filepath.Dir(targetPath), constants.DirPerm); err != nil {
+		log.Errorf("Error mkdir: %s", err.Error())
+		return err
+	}
+
+	targetFile, err = destFs.Create(targetPath)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if err == nil {
+			err = targetFile.Close()
+		} else {
+			_ = destFs.Remove(targetPath)
+		}
+	}()
+
+	featFile, err = files.Open(path)
+	if err != nil {
+		log.Errorf("Error opening embedded file '%s': %s", path, err.Error())
+		return err
+	}
+	defer func() {
+		nErr := featFile.Close()
+		if err == nil {
+			err = nErr
+		}
+	}()
+
+	log.Debugf("Writing file '%s' to '%s'", path, targetPath)
+	_, err = io.Copy(targetFile, featFile)
+	if err != nil {
+		log.Errorf("failed copying file %s to path %s: %v", path, targetPath, err)
+		return err
+	}
+
+	log.Debugf("Setting file permissions to file '%s'", targetPath)
+	fInfo, err = featFile.Stat()
+	if err != nil {
+		log.Errorf("failed getting file info for %s: %v", path, err)
+		return err
+	}
+	err = destFs.Chmod(targetPath, fInfo.Mode())
+	return err
 }

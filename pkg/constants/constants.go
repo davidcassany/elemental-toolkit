@@ -22,10 +22,6 @@ import (
 )
 
 const (
-	GrubConf           = "/etc/cos/grub.cfg"
-	GrubOEMEnv         = "grub_oem_env"
-	GrubEnv            = "grubenv"
-	GrubDefEntry       = "Elemental"
 	BiosPartName       = "bios"
 	EfiLabel           = "COS_GRUB"
 	EfiPartName        = "efi"
@@ -67,6 +63,24 @@ const (
 	UsrLocalPath       = "/usr/local"
 	OEMPath            = "/oem"
 	ConfigDir          = "/etc/elemental"
+
+	// Kernel and initrd paths
+	KernelModulesDir = "/lib/modules"
+	KernelPath       = "/boot/vmlinuz"
+	InitrdPath       = "/boot/initrd"
+	ElementalInitrd  = "/boot/elemental.initrd"
+
+	// Bootloader constants
+	EntryEFIPath    = "/EFI/ELEMENTAL"
+	FallbackEFIPath = "/EFI/BOOT"
+	BootEntryName   = "elemental-shim"
+	EfiImgX86       = "bootx64.efi"
+	EfiImgArm64     = "bootaa64.efi"
+	GrubCfg         = "grub.cfg"
+	GrubCfgPath     = "/etc/cos"
+	GrubOEMEnv      = "grub_oem_env"
+	GrubEnv         = "grubenv"
+	GrubDefEntry    = "Elemental"
 
 	// Mountpoints of images and partitions
 	RecoveryDir     = "/run/cos/recovery"
@@ -141,12 +155,62 @@ const (
 	ArchArm64   = "arm64"
 	ArchAarch64 = "aarch64"
 
-	Fedora = "fedora"
-	Ubuntu = "ubuntu"
-	Suse   = "suse"
-
 	Rsync = "rsync"
 )
+
+func GetKernelPatterns() []string {
+	return []string{
+		"/boot/uImage*",
+		"/boot/Image*",
+		"/boot/zImage*",
+		"/boot/vmlinuz*",
+		"/boot/image*",
+	}
+}
+
+func GetInitrdPatterns() []string {
+	return []string{
+		"/boot/elemental.initrd*",
+		"/boot/initrd*",
+		"/boot/initramfs*",
+	}
+}
+
+func GetShimFilePatterns() []string {
+	return []string{
+		"/boot/efi/EFI/elemental/shim*",
+		"/usr/share/efi/*/shim.efi",
+		"/boot/efi/EFI/*/shim*.efi",
+	}
+}
+
+func GetGrubEFIFilePatterns() []string {
+	return []string{
+		"/boot/efi/EFI/elemental/grub*",
+		"/usr/share/grub2/*-efi/grub.efi",
+		"/boot/efi/EFI/*/grub*.efi",
+	}
+}
+
+func GetMokMngrFilePatterns() []string {
+	return []string{
+		"/boot/efi/EFI/elemental/mm*",
+		"/boot/efi/EFI/*/mm*.efi",
+		"/usr/share/efi/*/MokManager.efi",
+	}
+}
+
+func GetDefaultGrubModules() []string {
+	return []string{"loopback.mod", "squash4.mod", "xzio.mod"}
+}
+
+func GetDefaultGrubModulesPatterns() []string {
+	return []string{
+		"/boot/grub2/*-efi",
+		"/usr/share/grub*/*-efi",
+		"/usr/lib/grub*/*-efi",
+	}
+}
 
 func GetCloudInitPaths() []string {
 	return []string{"/system/oem", "/oem/", "/usr/local/cloud-config/"}

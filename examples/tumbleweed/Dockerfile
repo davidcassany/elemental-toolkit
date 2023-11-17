@@ -22,6 +22,7 @@ RUN ARCH=$(uname -m); \
       haveged \
       systemd \
       NetworkManager \
+      iproute2 \
       openssh-server \
       openssh-clients \
       timezone \
@@ -42,24 +43,29 @@ RUN ARCH=$(uname -m); \
       less \
       sudo \
       curl \
+      patch \
       sed
 
 # Just add the elemental cli
 COPY --from=TOOLKIT /usr/bin/elemental /usr/bin/elemental
 
 # Enable essential services
-RUN systemctl enable NetworkManager.service
+RUN systemctl enable NetworkManager.service && \
+    systemctl enable sshd.service
 
 # This is for automatic testing purposes, do not do this in production.
 RUN echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/rootlogin.conf
 
+# This is patches are fix upstream dracut, see https://github.com/dracutdevs/dracut/pull/2525
+ADD patches /
+
+RUN cd /usr/lib/dracut && \
+    patch -p 1 -f -i /0001-fix-dmsquash-live-restore-compatibility-with-earlier.patch && \
+    patch -p 1 -f -i /0001-fix-overlayfs-split-overlayfs-mount-in-two-steps.patch && \
+    rm /*.patch
+
 # Generate initrd with required elemental services
-RUN elemental init -f && \
-    kernel=$(ls /boot/Image-* | head -n1) && \
-    if [ -e "$kernel" ]; then ln -sf "${kernel#/boot/}" /boot/vmlinuz; fi && \
-    rm -rf /var/log/update* && \
-    >/var/log/lastlog && \
-    rm -rf /boot/vmlinux*
+RUN elemental --debug init -f 
 
 # Update os-release file with some metadata
 RUN echo IMAGE_REPO=\"${REPO}\"         >> /etc/os-release && \
