@@ -238,8 +238,6 @@ func (u *UpgradeAction) Run() (err error) {
 			return elementalError.NewFromError(err, elementalError.MoveFile)
 		}
 		u.Info("Finished moving %s to %s", upgradeImg.File, finalImageFile)
-
-		u.config.Runner.RunNoError("sync")
 	}
 
 	err = u.upgradeHook(constants.PostUpgradeHook)

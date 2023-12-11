@@ -215,7 +215,7 @@ func MountFileSystemImage(cfg *v1.Config, img *v1.Image, opts ...string) error {
 	err = cfg.Mounter.Mount(loop, img.MountPoint, "auto", opts)
 	if err != nil {
 		cfg.Logger.Errorf("failed to mount %s", loop)
-		cfg.Runner.RunNoError("losetup", "-d", loop)
+		_, _ = cfg.Runner.Run("losetup", "-d", loop)
 		return err
 	}
 	img.LoopDevice = loop
@@ -235,7 +235,7 @@ func UmountFileSystemImage(cfg *v1.Config, img *v1.Image) error {
 	cfg.Logger.Debugf("Unmounting image from %s", img.MountPoint)
 	err := cfg.Mounter.Unmount(img.MountPoint)
 	if err != nil {
-		cfg.Runner.RunNoError("losetup", "-d", loop)
+		_, _ = cfg.Runner.Run("losetup", "-d", loop)
 		return err
 	}
 	_, err = cfg.Runner.Run("losetup", "-d", loop)
