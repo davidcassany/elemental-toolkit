@@ -34,6 +34,7 @@ type FS interface {
 	RawPath(name string) (string, error)
 	ReadDir(dirname string) ([]os.FileInfo, error)
 	Remove(name string) error
+	Rename(oldpath, newpath string) error
 	OpenFile(name string, flag int, perm fs.FileMode) (*os.File, error)
 	WriteFile(filename string, data []byte, perm os.FileMode) error
 	Symlink(oldname, newname string) error

@@ -25,14 +25,15 @@ import (
 var _ v1.Bootloader = (*FakeBootloader)(nil)
 
 type FakeBootloader struct {
-	ErrorInstall                bool
-	ErrorInstallConfig          bool
-	ErrorDoEFIEntries           bool
-	ErrorInstallEFI             bool
-	ErrorInstallEFIFallback     bool
-	ErrorInstallEFIElemental    bool
-	ErrorSetPersistentVariables bool
-	ErrorSetDefaultEntry        bool
+	ErrorInstall                 bool
+	ErrorInstallConfig           bool
+	ErrorDoEFIEntries            bool
+	ErrorInstallEFI              bool
+	ErrorInstallEFIFallback      bool
+	ErrorInstallEFIElemental     bool
+	ErrorSetPersistentVariables  bool
+	ErrorListPersistentVariables bool
+	ErrorSetDefaultEntry         bool
 }
 
 func (f *FakeBootloader) Install(_, _, _ string) error {
@@ -82,6 +83,13 @@ func (f *FakeBootloader) SetPersistentVariables(_ string, _ map[string]string) e
 		return fmt.Errorf("error setting persistent variables")
 	}
 	return nil
+}
+
+func (f *FakeBootloader) ListPersistentVariables(_ string) (map[string]string, error) {
+	if f.ErrorListPersistentVariables {
+		return nil, fmt.Errorf("error setting persistent variables")
+	}
+	return map[string]string{}, nil
 }
 
 func (f *FakeBootloader) SetDefaultEntry(_, _, _ string) error {

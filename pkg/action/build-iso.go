@@ -53,7 +53,6 @@ type BuildISOAction struct {
 	cfg        *v1.BuildConfig
 	spec       *v1.LiveISO
 	bootloader v1.Bootloader
-	e          *elemental.Elemental
 }
 
 type BuildISOActionOption func(a *BuildISOAction)
@@ -67,7 +66,6 @@ func WithLiveBootloader(b v1.Bootloader) BuildISOActionOption {
 func NewBuildISOAction(cfg *v1.BuildConfig, spec *v1.LiveISO, opts ...BuildISOActionOption) *BuildISOAction {
 	b := &BuildISOAction{
 		cfg:  cfg,
-		e:    elemental.NewElemental(&cfg.Config),
 		spec: spec,
 	}
 	for _, opt := range opts {
@@ -251,7 +249,7 @@ func (b BuildISOAction) createEFI(root string, img string) error {
 	align := int64(4 * 1024 * 1024)
 	efiSizeMB := (efiSize/align*align + align) / (1024 * 1024)
 
-	err = b.e.CreateFileSystemImage(&v1.Image{
+	err = elemental.CreateSimpleFileSystemImage(&b.cfg.Config, &v1.Image{
 		File:  img,
 		Size:  uint(efiSizeMB),
 		FS:    constants.EfiFs,
@@ -329,7 +327,7 @@ func (b BuildISOAction) burnISO(root, efiImg string) error {
 
 func (b BuildISOAction) applySources(target string, sources ...*v1.ImageSource) error {
 	for _, src := range sources {
-		_, err := b.e.DumpSource(target, src)
+		_, err := elemental.DumpSource(&b.cfg.Config, target, src)
 		if err != nil {
 			return elementalError.NewFromError(err, elementalError.DumpSource)
 		}

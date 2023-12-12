@@ -24,5 +24,6 @@ type Bootloader interface {
 	InstallEFIFallbackBinaries(rootDir, efiDir, deviceLabel string) error
 	InstallEFIElementalBinaries(rootDir, efiDir, deviceLabel string) error
 	SetPersistentVariables(envFile string, vars map[string]string) error
+	ListPersistentVariables(envFile string) (map[string]string, error)
 	SetDefaultEntry(partMountPoint, imgMountPoint, defaultEntry string) error
 }

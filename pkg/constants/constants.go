@@ -72,18 +72,22 @@ const (
 	InitrdPath       = "/boot/initrd"
 	ElementalInitrd  = "/boot/elemental.initrd"
 
-	// Bootloader constants
-	EntryEFIPath           = "/EFI/ELEMENTAL"
-	FallbackEFIPath        = "/EFI/BOOT"
-	BootEntryName          = "elemental-shim"
-	EfiImgX86              = "bootx64.efi"
-	EfiImgArm64            = "bootaa64.efi"
-	EfiImgRiscv64          = "bootriscv64.efi"
+	// EFI firmware constants
+	EntryEFIPath    = "/EFI/ELEMENTAL"
+	FallbackEFIPath = "/EFI/BOOT"
+	BootEntryName   = "elemental-shim"
+	EfiImgX86       = "bootx64.efi"
+	EfiImgArm64     = "bootaa64.efi"
+	EfiImgRiscv64   = "bootriscv64.efi"
+
+	// Grub constants
 	GrubCfg                = "grub.cfg"
 	GrubCfgPath            = "/etc/cos"
 	GrubOEMEnv             = "grub_oem_env"
 	GrubEnv                = "grubenv"
 	GrubDefEntry           = "Elemental"
+	GrubFallbackVar        = "default_fallback"
+	GrubSnapsVar           = "passive_snaps"
 	ElementalBootloaderBin = "/usr/lib/elemental/bootloader"
 
 	// Mountpoints of images and partitions
@@ -100,6 +104,11 @@ const (
 	OverlayDir         = "/run/elemental/overlay"
 	RunningStateDir    = "/run/initramfs/elemental-state" // TODO: converge this constant with StateDir/RecoveryDir when moving to elemental-rootfs as default rootfs feature.
 
+	// Running mode sentinel files
+	ActiveMode   = "/run/cos/active_mode"
+	PassiveMode  = "/run/cos/passive_mode"
+	RecoveryMode = "/run/cos/recovery_mode"
+
 	// Live image mountpoints
 	ISOBaseTree = "/run/rootfsbase"
 	LiveDir     = "/run/initramfs/live"
@@ -108,13 +117,17 @@ const (
 	ActiveImgName     = "active"
 	PassiveImgName    = "passive"
 	RecoveryImgName   = "recovery"
-	ActiveImgFile     = "active.img"
-	PassiveImgFile    = "passive.img"
+	ActiveImgFile     = "active.img"  //TODO deleteme in favor of ActiveSnap
+	PassiveImgFile    = "passive.img" // TODO deleteme in facor of PassiveSnap
 	RecoveryImgFile   = "recovery.img"
 	TransitionImgFile = "transition.img"
 	ActiveImgPath     = "/cOS/active.img"
 	PassiveImgPath    = "/cOS/passive.img"
 	RecoveryImgPath   = "/cOS/recovery.img"
+
+	// Snapshots names
+	ActiveSnap  = "active"
+	PassiveSnap = "passive_%d"
 
 	// Yip stages evaluated on reset/upgrade/install/build-disk actions
 	AfterInstallChrootHook = "after-install-chroot"

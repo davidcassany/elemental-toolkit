@@ -23,7 +23,6 @@ import (
 	"strings"
 
 	"github.com/twpayne/go-vfs"
-	"k8s.io/mount-utils"
 
 	"github.com/rancher/elemental-toolkit/pkg/cloudinit"
 	"github.com/rancher/elemental-toolkit/pkg/constants"
@@ -61,7 +60,7 @@ func WithSyscall(syscall v1.SyscallInterface) func(r *v1.Config) error {
 	}
 }
 
-func WithMounter(mounter mount.Interface) func(r *v1.Config) error {
+func WithMounter(mounter v1.Mounter) func(r *v1.Config) error {
 	return func(r *v1.Config) error {
 		r.Mounter = mounter
 		return nil
@@ -155,7 +154,7 @@ func NewConfig(opts ...GenericOptions) *v1.Config {
 	}
 
 	if c.Mounter == nil {
-		c.Mounter = mount.New(constants.MountBinary)
+		c.Mounter = v1.NewMounter(constants.MountBinary)
 	}
 
 	return c
@@ -171,41 +170,38 @@ func NewRunConfig(opts ...GenericOptions) *v1.RunConfig {
 
 // NewInstallSpec returns an InstallSpec struct all based on defaults and basic host checks (e.g. EFI vs BIOS)
 func NewInstallSpec(cfg v1.Config) *v1.InstallSpec {
-	var recoveryImg, activeImg, passiveImg v1.Image
+	var recoveryImg v1.Image
+	var source *v1.ImageSource
 
 	// Check the default ISO installation media is available
 	isoRootExists, _ := utils.Exists(cfg.Fs, constants.ISOBaseTree)
 
-	activeImg.Label = constants.ActiveLabel
-	activeImg.Size = constants.ImgSize
-	activeImg.File = filepath.Join(constants.StateDir, constants.ActiveImgPath)
-	activeImg.FS = constants.LinuxImgFs
-	activeImg.MountPoint = constants.ActiveDir
 	if isoRootExists {
-		activeImg.Source = v1.NewDirSrc(constants.ISOBaseTree)
+		source = v1.NewDirSrc(constants.ISOBaseTree)
 	} else {
-		activeImg.Source = v1.NewEmptySrc()
+		source = v1.NewEmptySrc()
 	}
 
-	recoveryImg.Source = v1.NewFileSrc(activeImg.File)
-	recoveryImg.FS = constants.LinuxImgFs
+	recoveryImg.Source = source
+	recoveryImg.FS = constants.SquashFs
 	recoveryImg.Label = constants.SystemLabel
-	recoveryImg.File = filepath.Join(constants.RecoveryDir, constants.RecoveryImgPath)
+	recoveryImg.File = filepath.Join(constants.RecoveryDir, constants.RecoveryImgFile)
 
-	passiveImg = v1.Image{
-		File:   filepath.Join(constants.StateDir, constants.PassiveImgPath),
-		Label:  constants.PassiveLabel,
-		Source: v1.NewFileSrc(activeImg.File),
-		FS:     constants.LinuxImgFs,
+	// TODO write constants
+	snapshotCfg := &v1.SnapshotterConfig{
+		Type:     "loopdevice",
+		MaxSnaps: 3,
+		FS:       constants.LinuxImgFs,
+		Size:     constants.ImgSize,
 	}
 
 	return &v1.InstallSpec{
-		Firmware:   v1.EFI,
-		PartTable:  v1.GPT,
-		Partitions: NewInstallElementalPartitions(),
-		Active:     activeImg,
-		Recovery:   recoveryImg,
-		Passive:    passiveImg,
+		Firmware:       v1.EFI,
+		PartTable:      v1.GPT,
+		Partitions:     NewInstallElementalPartitions(),
+		Active:         source,
+		Recovery:       recoveryImg,
+		SnapshotterCfg: snapshotCfg,
 	}
 }
 
@@ -347,15 +343,17 @@ func getActivePassiveAndRecoveryState(state *v1.InstallState) (active, passive, 
 
 // NewUpgradeSpec returns an UpgradeSpec struct all based on defaults and current host state
 func NewUpgradeSpec(cfg v1.Config) (*v1.UpgradeSpec, error) {
-	var aState, pState, rState *v1.ImageState
-	var active, passive, recovery v1.Image
+	var rState *v1.ImageState
+	var recovery v1.Image
+	var active *v1.ImageSource
 
 	installState, err := cfg.LoadInstallState()
 	if err != nil {
 		cfg.Logger.Warnf("failed reading installation state: %s", err.Error())
 	}
 
-	aState, pState, rState = getActivePassiveAndRecoveryState(installState)
+	// TODO this method requires a rewrite
+	_, _, rState = getActivePassiveAndRecoveryState(installState)
 
 	parts, err := utils.GetAllPartitions()
 	if err != nil {
@@ -369,7 +367,7 @@ func NewUpgradeSpec(cfg v1.Config) (*v1.UpgradeSpec, error) {
 		}
 
 		recovery = v1.Image{
-			File:       filepath.Join(ep.Recovery.MountPoint, "cOS", constants.TransitionImgFile),
+			File:       filepath.Join(ep.Recovery.MountPoint, constants.TransitionImgFile),
 			Size:       constants.ImgSize,
 			Label:      rState.Label,
 			FS:         rState.FS,
@@ -383,21 +381,7 @@ func NewUpgradeSpec(cfg v1.Config) (*v1.UpgradeSpec, error) {
 			ep.State.MountPoint = constants.StateDir
 		}
 
-		active = v1.Image{
-			File:       filepath.Join(ep.State.MountPoint, "cOS", constants.TransitionImgFile),
-			Size:       constants.ImgSize,
-			Label:      aState.Label,
-			FS:         aState.FS,
-			MountPoint: constants.TransitionDir,
-			Source:     v1.NewEmptySrc(),
-		}
-
-		passive = v1.Image{
-			File:   filepath.Join(ep.State.MountPoint, "cOS", constants.PassiveImgFile),
-			Label:  pState.Label,
-			Source: v1.NewFileSrc(active.File),
-			FS:     active.FS,
-		}
+		active = v1.NewEmptySrc()
 	}
 
 	// This is needed if we want to use the persistent as tmpdir for the upgrade images
@@ -409,21 +393,27 @@ func NewUpgradeSpec(cfg v1.Config) (*v1.UpgradeSpec, error) {
 		}
 	}
 
+	snapshotCfg := &v1.SnapshotterConfig{
+		Type:     "loopdevice",
+		MaxSnaps: 3,
+		FS:       constants.LinuxImgFs,
+		Size:     constants.ImgSize,
+	}
+
 	return &v1.UpgradeSpec{
-		Active:     active,
-		Recovery:   recovery,
-		Passive:    passive,
-		Partitions: ep,
-		State:      installState,
+		Active:         active,
+		Recovery:       recovery,
+		Partitions:     ep,
+		State:          installState,
+		SnapshotterCfg: snapshotCfg,
 	}, nil
 }
 
 // NewResetSpec returns a ResetSpec struct all based on defaults and current host state
 func NewResetSpec(cfg v1.Config) (*v1.ResetSpec, error) {
 	var imgSource *v1.ImageSource
-	var aState, pState *v1.ImageState
 
-	if !utils.BootedFrom(cfg.Runner, constants.RecoveryImgName) {
+	if !utils.BootedFrom(cfg.Runner, constants.RecoveryImgFile) {
 		return nil, fmt.Errorf("reset can only be called from the recovery system")
 	}
 
@@ -433,7 +423,6 @@ func NewResetSpec(cfg v1.Config) (*v1.ResetSpec, error) {
 	if err != nil {
 		cfg.Logger.Warnf("failed reading installation state: %s", err.Error())
 	}
-	aState, pState, _ = getActivePassiveAndRecoveryState(installState)
 
 	parts, err := utils.GetAllPartitions()
 	if err != nil {
@@ -488,7 +477,7 @@ func NewResetSpec(cfg v1.Config) (*v1.ResetSpec, error) {
 		cfg.Logger.Warnf("no Persistent partition found")
 	}
 
-	recoveryImg := filepath.Join(constants.RunningStateDir, constants.RecoveryImgPath)
+	recoveryImg := filepath.Join(constants.RunningStateDir, constants.RecoveryImgFile)
 
 	if exists, _ := utils.Exists(cfg.Fs, recoveryImg); exists {
 		imgSource = v1.NewFileSrc(recoveryImg)
@@ -496,27 +485,21 @@ func NewResetSpec(cfg v1.Config) (*v1.ResetSpec, error) {
 		imgSource = v1.NewEmptySrc()
 	}
 
-	activeFile := filepath.Join(ep.State.MountPoint, constants.ActiveImgPath)
+	snapshotCfg := &v1.SnapshotterConfig{
+		Type:     "loopdevice",
+		MaxSnaps: 3,
+		FS:       constants.LinuxImgFs,
+		Size:     constants.ImgSize,
+	}
+
 	return &v1.ResetSpec{
-		Target:       target,
-		Partitions:   ep,
-		Efi:          efiExists,
-		GrubDefEntry: constants.GrubDefEntry,
-		Active: v1.Image{
-			Label:      aState.Label,
-			Size:       constants.ImgSize,
-			File:       activeFile,
-			FS:         aState.FS,
-			Source:     imgSource,
-			MountPoint: constants.ActiveDir,
-		},
-		Passive: v1.Image{
-			File:   filepath.Join(ep.State.MountPoint, constants.PassiveImgPath),
-			Label:  pState.Label,
-			Source: v1.NewFileSrc(activeFile),
-			FS:     aState.FS,
-		},
-		State: installState,
+		Target:         target,
+		Partitions:     ep,
+		Efi:            efiExists,
+		GrubDefEntry:   constants.GrubDefEntry,
+		Active:         imgSource,
+		State:          installState,
+		SnapshotterCfg: snapshotCfg,
 	}, nil
 }
 
