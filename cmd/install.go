@@ -22,10 +22,10 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/rancher/elemental-toolkit/cmd/config"
-	"github.com/rancher/elemental-toolkit/pkg/action"
-	elementalError "github.com/rancher/elemental-toolkit/pkg/error"
-	v1 "github.com/rancher/elemental-toolkit/pkg/types/v1"
+	"github.com/rancher/elemental-toolkit/v2/cmd/config"
+	"github.com/rancher/elemental-toolkit/v2/pkg/action"
+	elementalError "github.com/rancher/elemental-toolkit/v2/pkg/error"
+	v2 "github.com/rancher/elemental-toolkit/v2/pkg/types/v2"
 )
 
 // NewInstallCmd returns a new instance of the install subcommand and appends it to
@@ -47,7 +47,7 @@ func NewInstallCmd(root *cobra.Command, addCheckRoot bool) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			mounter := v1.NewMounter(path)
+			mounter := v2.NewMounter(path)
 
 			cfg, err := config.ReadConfigRun(viper.GetString("config-dir"), cmd.Flags(), mounter)
 			if err != nil {
@@ -88,8 +88,8 @@ func NewInstallCmd(root *cobra.Command, addCheckRoot bool) *cobra.Command {
 			return install.Run()
 		},
 	}
-	firmType := newEnumFlag([]string{v1.EFI}, v1.EFI)
-	pTableType := newEnumFlag([]string{v1.GPT}, v1.GPT)
+	firmType := newEnumFlag([]string{v2.EFI}, v2.EFI)
+	pTableType := newEnumFlag([]string{v2.GPT}, v2.GPT)
 
 	root.AddCommand(c)
 	c.Flags().StringSliceP("cloud-init", "c", []string{}, "Cloud-init config files")
