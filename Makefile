@@ -65,6 +65,7 @@ pull-toolkit:
 
 .PHONY: build-cli
 build-cli:
+	go generate ./...
 	go build -ldflags '$(LDFLAGS)' -o build/elemental
 
 .PHONY: build-os
@@ -156,4 +157,5 @@ lint: fmt vet
 .PHONY: build-docs
 build-docs:
 	@./scripts/docs-build.sh
+	go generate ./...
 	cd docs && go run generate_docs.go
