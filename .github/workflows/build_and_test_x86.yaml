@@ -206,7 +206,6 @@ jobs:
           fail-on-cache-miss: true
       - name: Enable KVM group perms
         run: |
-          # Testing KVM support
           sudo apt-get update
           sudo apt-get install qemu qemu-img ovmf
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
@@ -270,7 +269,6 @@ jobs:
           fail-on-cache-miss: true
       - name: Enable KVM group perms
         run: |
-          # Testing KVM support
           sudo apt-get update
           sudo apt-get install qemu qemu-img ovmf
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
