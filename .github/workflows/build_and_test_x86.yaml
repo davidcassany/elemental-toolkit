@@ -11,7 +11,7 @@ on:
         type: string
 
 concurrency:
-  group: ci-${{ inputs.flavor }}-x86_64-${{ github.head_ref || github.ref }}-${{ github.repository }}
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref_name }}-${{ inputs.flavor }}-x86_64
   cancel-in-progress: true
 
 jobs:
