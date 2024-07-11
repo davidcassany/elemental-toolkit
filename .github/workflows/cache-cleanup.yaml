@@ -14,33 +14,33 @@ on:
     types: [completed]
     branches: [main]
 
-permissions:
-  # `actions:write` permission is required to delete caches
-  #   See also: https://docs.github.com/en/rest/actions/cache?apiVersion=2022-11-28#delete-a-github-actions-cache-for-a-repository-using-a-cache-id
-  actions: write
-  contents: read
-
 jobs:
+  version:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    outpus:
+      version: ${{ steps.version.outputs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: "${{ github.event.pull_request.head.sha }}"
+      - run: |
+          git fetch --prune --unshallow
+      - name: Define version
+        id: version
+        uses: ./.github/actions/version
+
   cleanup:
+    permissions:
+      # `actions:write` permission is required to delete caches
+      #  See also: https://docs.github.com/en/rest/actions/cache?apiVersion=2022-11-28#delete-a-github-actions-cache-for-a-repository-using-a-cache-id
+      actions: write
+      contents: read
+    needs:
+      - version
     runs-on: ubuntu-latest
     steps:
-      - name: Fetch version hash
-        id: fetch-version
-        uses: actions/cache/restore@v4
-        env:
-          cache-name: version_hash
-        with:
-          path: /tmp/version_hash
-          key: version_hash-${{ github.event_name == 'push' && github.sha || format('{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) }}
-          restore-keys: |
-            version_hash-${{ github.event_name == 'workflow_run' && github.sha || github.event.pull_request.number }}
-      - name: Set version output
-        id: version
-        shell: bash
-        run: |
-          if [ -f /tmp/version_hash ]; then
-            cat /tmp/version_hash >> $GITHUB_OUTPUT
-          fi
       - name: Cleanup
         run: |
           gh extension install actions/gh-actions-cache
@@ -63,5 +63,5 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.event_name == 'workflow_run' && github.ref_name || format('refs/pull/{0}/merge', github.event.pull_request.number) }} 
-          VERSION: ${{ steps.version.outputs.version }}
+          VERSION: ${{ needs.version.outputs.version }}
           DELETE_ALL: ${{ github.event_name == 'workflow_run' && 'yes' || github.event_name == 'pull_request_target' && github.event.action == 'closed' && 'yes' }}
