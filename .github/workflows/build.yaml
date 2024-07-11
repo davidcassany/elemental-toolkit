@@ -43,12 +43,10 @@ jobs:
           git fetch --prune --unshallow
       - name: Define version
         id: version
-        env:
-          hash: ${{ hashFiles('Dockerfile', '**/go.sum', '**/pkg/**', '**/examples/**', '**/cmd/**', '**/vendor/**', '**/Makefile', '**/main.go') }}
-        run: |
-          version="${{ env.hash }}"
-          version=${version::16}
-          echo "version=${version}" >> $GITHUB_OUTPUT
+        uses: ./.github/actions/version
+        with:
+          key: ${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.number }}
+          action: save
       - name: Check cache for Toolkit image
         id: cache-toolkit
         uses: actions/cache/restore@v4

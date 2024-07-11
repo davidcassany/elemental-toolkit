@@ -1,0 +1,60 @@
+name: Define version
+descriptions: Defines and caches a hash used for versioning specific builds
+
+inputs:
+  action:
+    type: choice
+    description: Either define and store version or loads it from cache
+    options: 
+      - save
+      - load
+    default: save
+
+  key:
+    type: string
+    required: false
+    description: sets the cache key to store/load
+
+outputs:
+  version:
+    description: the saved/stored version
+    value: ${{ steps.result.outputs.version }}
+
+runs:
+  using: composite
+  steps:
+    - if: ${{ inputs.action == 'save' }}
+      name: Define version
+      id: version
+      shell: bash
+      env:
+        hash: ${{ hashFiles('Dockerfile', '**/go.sum', '**/pkg/**', '**/examples/**', '**/cmd/**', '**/vendor/**', '**/Makefile', '**/main.go') }}
+      run: |
+        version="${{ env.hash }}"
+        version=${version::16}
+        echo "version=${version}" >> /tmp/version_hash
+    - if: ${{ inputs.action == 'save' }}
+      name: Save version hash in cache
+      id: save-version
+      uses: actions/cache/save@v4
+      env:
+        cache-name: version_hash
+      with:
+        path: /tmp/version_hash
+        key: version_hash-${{ inputs.key }}
+    - if: ${{ inputs.action == 'load' }}
+      name: Fetch version hash
+      id: fetch-version
+      uses: actions/cache/restore@v4
+      env:
+        cache-name: version_hash
+      with:
+        path: /tmp/version_hash
+        key: version_hash-${{ inputs.key }}
+    - name: Set ouputs
+      id: result
+      shell: bash
+      run: |
+        if [ -f /tmp/version_hash ]; then
+          cat /tmp/version_hash >> $GITHUB_OUTPUT
+        fi

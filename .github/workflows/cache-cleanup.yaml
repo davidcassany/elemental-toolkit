@@ -8,6 +8,12 @@ on:
       - synchronize
       - closed
 
+  workflow_run:
+    workflows: [Build]
+    types: [completed]
+    branches: [main]
+
+
 permissions:
   # `actions:write` permission is required to delete caches
   #   See also: https://docs.github.com/en/rest/actions/cache?apiVersion=2022-11-28#delete-a-github-actions-cache-for-a-repository-using-a-cache-id
@@ -18,37 +24,34 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Define version
+      - name: Get version
         id: version
-        env:
-          hash: ${{ hashFiles('Dockerfile', '**/go.sum', '**/pkg/**', '**/examples/**', '**/cmd/**', '**/vendor/**', '**/Makefile', '**/main.go') }}
-        run: |
-          version="${{ env.hash }}"
-          version=${version::16}
-          echo "version=${version}" >> $GITHUB_OUTPUT
-      - name: Cleanup
+        uses: ./.github/actions/version
+        with:
+          key: ${{ github.event_name == 'workflow_run' && github.ref_name || github.event.pull_request.number }}
+          action: load
+      - if: ${{ steps.version.outputs.version }}
+	name: Cleanup
         run: |
           gh extension install actions/gh-actions-cache
           
           echo "Fetching list of cache key"
-          cacheKeysForPR=$(gh actions-cache list -R $REPO -B $BRANCH -L 100 | cut -f 1 )
+          cacheKeysForPR=$(gh actions-cache list -R "${REPO}" -B "${BRANCH}" -L 100 | cut -f 1 )
 
           echo "Deleting caches..."
           for cacheKey in $cacheKeysForPR
           do
-            case $cacheKey in
-              *$VERSION*)
-                echo "Not deleting $cacheKey as this is from the current workflow"
-                ;;
-              *)
-                echo "Deleting $cacheKey as this is a leftover from antoher run"
+            if [[ "${DELETE_ALL}" = "yes" ]] || [[ ! "${cachekey}" =~ "${VERSION}" ]]; then
+                echo "Deleting $cacheKey as this is a leftover from a previous run"
                 gh actions-cache delete $cacheKey -R $REPO -B $BRANCH --confirm
-                ;;
-            esac
+            else
+		echo "Not deleting $cacheKey as this does not match the criteria"
+            fi
           done
           echo "Done"
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           REPO: ${{ github.repository }}
-          BRANCH: refs/pull/${{ github.event.pull_request.number }}/merge
+          BRANCH: ${{ github.event_name == 'workflow_run' && github.ref_name || format('{{refs/pull/{0}/merge}}', github.event.pull_request.number) }} 
           VERSION: ${{ steps.version.outputs.version }}
+	  DELETE_ALL: ${{ github.event_name == 'workflow_run' && 'yes' || 'no' }}
