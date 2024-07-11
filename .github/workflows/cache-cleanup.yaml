@@ -34,7 +34,7 @@ jobs:
           cache-name: version_hash
         with:
           path: /tmp/version_hash
-          key: version_hash-${{ github.event_name == 'workflow_run' && github.ref_name || github.event.pull_request.number }}
+          key: version_hash-${{ github.event_name == 'workflow_run' && github.sha || github.event.pull_request.number }}
       - name: Set version output
         id: version
         shell: bash

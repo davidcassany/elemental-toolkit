@@ -62,7 +62,7 @@ jobs:
           cache-name: version_hash
         with:
           path: /tmp/version_hash
-          key: version_hash-${{ github.event_name == 'push' && github.ref_name || github.event.pull_request.number }}
+          key: version_hash-${{ github.event_name == 'push' && github.sha || github.event.pull_request.number }}
       - name: Check cache for Toolkit image
         id: cache-toolkit
         uses: actions/cache/restore@v4
