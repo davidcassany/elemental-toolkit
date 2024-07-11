@@ -23,12 +23,21 @@ jobs:
   cleanup:
     runs-on: ubuntu-latest
     steps:
-      - name: Get version
-        id: version
-        uses: ./.github/actions/version
+      - name: Fetch version hash
+        id: fetch-version
+        uses: actions/cache/restore@v4
+        env:
+          cache-name: version_hash
         with:
-          key: ${{ github.event_name == 'workflow_run' && github.ref_name || github.event.pull_request.number }}
-          action: load
+          path: /tmp/version_hash
+          key: version_hash-${{ github.event_name == 'workflow_run' && github.ref_name || github.event.pull_request.number }}
+      - name: Set version output
+        id: version
+        shell: bash
+        run: |
+          if [ -f /tmp/version_hash ]; then
+            cat /tmp/version_hash >> $GITHUB_OUTPUT
+          fi
       - name: Cleanup
         run: |
           gh extension install actions/gh-actions-cache
