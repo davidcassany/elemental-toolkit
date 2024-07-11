@@ -5,6 +5,10 @@ on:
     branches:
       - main
 
+concurrency:
+  group: ci-${{ inputs.flavor }}-x86_64-${{ github.head_ref || github.ref }}-${{ github.repository }}
+  cancel-in-progress: true
+
 jobs:
   detect:
     permissions:
