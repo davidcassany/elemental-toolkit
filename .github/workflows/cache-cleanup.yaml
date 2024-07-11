@@ -14,10 +14,6 @@ on:
     types: [completed]
     branches: [main]
 
-concurrency:
-  group: ci-${{ inputs.flavor }}-x86_64-${{ github.head_ref || github.ref }}-${{ github.repository }}
-  cancel-in-progress: true
-
 permissions:
   # `actions:write` permission is required to delete caches
   #   See also: https://docs.github.com/en/rest/actions/cache?apiVersion=2022-11-28#delete-a-github-actions-cache-for-a-repository-using-a-cache-id
@@ -35,6 +31,7 @@ jobs:
           cache-name: version_hash
         with:
           path: /tmp/version_hash
+          key: version_hash-${{ github.event_name == 'push' && github.sha || format('{0}-{1}', github.event.pull_request.number, github.event.pull_request.head.sha) }}
           restore-keys: |
             version_hash-${{ github.event_name == 'workflow_run' && github.sha || github.event.pull_request.number }}
       - name: Set version output
