@@ -13,7 +13,6 @@ on:
     types: [completed]
     branches: [main]
 
-
 permissions:
   # `actions:write` permission is required to delete caches
   #   See also: https://docs.github.com/en/rest/actions/cache?apiVersion=2022-11-28#delete-a-github-actions-cache-for-a-repository-using-a-cache-id
@@ -44,7 +43,7 @@ jobs:
                 echo "Deleting $cacheKey as this is a leftover from a previous run"
                 gh actions-cache delete $cacheKey -R $REPO -B $BRANCH --confirm
             else
-		echo "Not deleting $cacheKey as this does not match the criteria"
+                echo "Not deleting $cacheKey as this does not match the criteria"
             fi
           done
           echo "Done"
@@ -53,4 +52,4 @@ jobs:
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.event_name == 'workflow_run' && github.ref_name || format('{{refs/pull/{0}/merge}}', github.event.pull_request.number) }} 
           VERSION: ${{ steps.version.outputs.version }}
-	  DELETE_ALL: ${{ github.event_name == 'workflow_run' && 'yes' || 'no' }}
+          DELETE_ALL: ${{ github.event_name == 'workflow_run' && 'yes' || 'no' }}
