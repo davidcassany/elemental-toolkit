@@ -19,7 +19,7 @@ jobs:
     permissions:
       contents: read
     runs-on: ubuntu-latest
-    outpus:
+    outputs:
       version: ${{ steps.version.outputs }}
     steps:
       - uses: actions/checkout@v4
