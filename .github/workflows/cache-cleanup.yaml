@@ -64,4 +64,4 @@ jobs:
           REPO: ${{ github.repository }}
           BRANCH: ${{ github.event_name == 'workflow_run' && github.ref_name || format('refs/pull/{0}/merge', github.event.pull_request.number) }} 
           VERSION: ${{ needs.version.outputs.version }}
-          DELETE_ALL: ${{ github.event_name == 'workflow_run' && 'yes' || github.event_name == 'pull_request_target' && github.event.action == 'closed' && 'yes' }}
+          DELETE_ALL: ${{ github.event_name == 'workflow_run' && 'yes' || github.event_name == 'pull_request_target' && github.event.action == 'closed' && 'yes' || 'no' }}
