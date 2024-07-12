@@ -51,7 +51,7 @@ jobs:
           echo "Deleting caches..."
           for cacheKey in $cacheKeysForPR
           do
-            if [[ "${DELETE_ALL}" == "yes" ]] || [[ ! "${cachekey}" =~ "${VERSION}" ]]; then
+            if [[ "${DELETE_ALL}" == "yes" ]] || [[ ! "${cacheKey}" =~ "${VERSION}" ]]; then
                 echo "Deleting $cacheKey as this is a leftover from a previous run"
                 gh actions-cache delete $cacheKey -R $REPO -B $BRANCH --confirm
             else
