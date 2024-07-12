@@ -8,7 +8,7 @@ on:
       - synchronize
       - closed
 
-  # After running tests in the main branch pushes we want to clean the cache for the branch
+  # After running tests in the main branch pushes we want to clean the cache on that branch
   workflow_run:
     workflows: [Build]
     types: [completed]
