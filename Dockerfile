@@ -11,13 +11,15 @@ WORKDIR /src/
 ADD go.mod .
 ADD go.sum .
 ADD vendor vendor
-RUN go mod download
 ADD cmd cmd
 ADD internal internal
 ADD pkg pkg
 ADD main.go .
 
-# Set arg/env after go mod download, otherwise we invalidate the cached layers due to the commit changing easily
+# Ensure vendor folder is consistent
+#RUN go mod verify
+
+# Set arg/env after go mod download, otherwise we invalidate the cached layers due commit hash changes
 ARG ELEMENTAL_VERSION=0.0.1
 ARG ELEMENTAL_COMMIT=""
 ENV ELEMENTAL_VERSION=${ELEMENTAL_VERSION}
