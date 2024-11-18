@@ -27,7 +27,7 @@ import (
 
 type Snapshotter interface {
 	InitSnapshotter(state *Partition, efiDir string) error
-	StartTransaction() (*Snapshot, error)
+	StartTransaction(src *ImageSource) (*Snapshot, error)
 	CloseTransaction(snap *Snapshot) error
 	CloseTransactionOnError(snap *Snapshot) error
 	DeleteSnapshot(id int) error

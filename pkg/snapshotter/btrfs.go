@@ -25,6 +25,7 @@ import (
 
 	"github.com/rancher/elemental-toolkit/v2/pkg/constants"
 	"github.com/rancher/elemental-toolkit/v2/pkg/elemental"
+	elementalError "github.com/rancher/elemental-toolkit/v2/pkg/error"
 	"github.com/rancher/elemental-toolkit/v2/pkg/types"
 	"github.com/rancher/elemental-toolkit/v2/pkg/utils"
 )
@@ -151,7 +152,7 @@ func (b *Btrfs) InitSnapshotter(state *types.Partition, efiDir string) error {
 }
 
 // StartTransaction starts a transaction for this snapshotter instance and returns the work in progress snapshot object.
-func (b *Btrfs) StartTransaction() (*types.Snapshot, error) {
+func (b *Btrfs) StartTransaction(src *types.ImageSource) (*types.Snapshot, error) {
 	var newID int
 	var err error
 	var snapshot *types.Snapshot
@@ -182,6 +183,12 @@ func (b *Btrfs) StartTransaction() (*types.Snapshot, error) {
 	}
 	snapshot.MountPoint = constants.WorkingImgDir
 	snapshot.InProgress = true
+
+	err = elemental.MirrorRoot(b.cfg, snapshot.WorkDir, src)
+	if err != nil {
+		b.cfg.Logger.Errorf("failed deploying source: %s", src.String())
+		return nil, elementalError.NewFromError(err, elementalError.DumpSource)
+	}
 
 	return snapshot, err
 }

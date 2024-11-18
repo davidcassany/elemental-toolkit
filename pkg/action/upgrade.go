@@ -284,19 +284,12 @@ func (u *UpgradeAction) Run() (err error) {
 
 	// Starting snapshotter transaction
 	u.cfg.Logger.Info("Starting snapshotter transaction")
-	u.snapshot, err = u.snapshotter.StartTransaction()
+	u.snapshot, err = u.snapshotter.StartTransaction(u.spec.System)
 	if err != nil {
 		u.cfg.Logger.Errorf("failed to start snapshotter transaction")
 		return elementalError.NewFromError(err, elementalError.SnapshotterStart)
 	}
 	cleanup.PushErrorOnly(func() error { return u.snapshotter.CloseTransactionOnError(u.snapshot) })
-
-	// Deploy system image
-	err = elemental.MirrorRoot(u.cfg.Config, u.snapshot.WorkDir, u.spec.System)
-	if err != nil {
-		u.cfg.Logger.Errorf("failed deploying source '%s': %v", u.spec.System.String(), err)
-		return elementalError.NewFromError(err, elementalError.DumpSource)
-	}
 
 	// Fine tune the dumped tree
 	u.cfg.Logger.Info("Fine tune the dumped root tree")

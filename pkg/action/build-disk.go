@@ -445,13 +445,6 @@ func (b *BuildDiskAction) createStatePartitionImage() (*types.Image, error) {
 		b.cfg.Logger.Errorf("failed initializing snapshotter")
 		return nil, elementalError.NewFromError(err, elementalError.SnapshotterInit)
 	}
-	// Starting snapshotter transaction
-	b.cfg.Logger.Info("Starting snapshotter transaction")
-	b.snapshot, err = b.snapshotter.StartTransaction()
-	if err != nil {
-		b.cfg.Logger.Errorf("failed to start snapshotter transaction")
-		return nil, elementalError.NewFromError(err, elementalError.SnapshotterStart)
-	}
 
 	system := b.spec.System
 	if b.spec.RecoverySystem.Source.String() == b.spec.System.String() {
@@ -460,12 +453,12 @@ func (b *BuildDiskAction) createStatePartitionImage() (*types.Image, error) {
 		b.spec.System.SetDigest(b.spec.RecoverySystem.Source.GetDigest())
 	}
 
-	// Deploy system image
-	err = elemental.MirrorRoot(b.cfg.Config, b.snapshot.WorkDir, system)
+	// Starting snapshotter transaction
+	b.cfg.Logger.Info("Starting snapshotter transaction")
+	b.snapshot, err = b.snapshotter.StartTransaction(system)
 	if err != nil {
-		_ = b.snapshotter.CloseTransactionOnError(b.snapshot)
-		b.cfg.Logger.Errorf("failed deploying source: %s", system.String())
-		return nil, elementalError.NewFromError(err, elementalError.DumpSource)
+		b.cfg.Logger.Errorf("failed to start snapshotter transaction")
+		return nil, elementalError.NewFromError(err, elementalError.SnapshotterStart)
 	}
 
 	// Closing snapshotter transaction

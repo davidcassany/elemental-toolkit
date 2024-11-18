@@ -219,19 +219,12 @@ func (i InstallAction) Run() (err error) {
 
 	// Starting snapshotter transaction
 	i.cfg.Logger.Info("Starting snapshotter transaction")
-	i.snapshot, err = i.snapshotter.StartTransaction()
+	i.snapshot, err = i.snapshotter.StartTransaction(i.spec.System)
 	if err != nil {
 		i.cfg.Logger.Errorf("failed to start snapshotter transaction")
 		return elementalError.NewFromError(err, elementalError.SnapshotterStart)
 	}
 	cleanup.PushErrorOnly(func() error { return i.snapshotter.CloseTransactionOnError(i.snapshot) })
-
-	// Deploy system image
-	err = elemental.MirrorRoot(i.cfg.Config, i.snapshot.WorkDir, i.spec.System)
-	if err != nil {
-		i.cfg.Logger.Errorf("failed deploying source: %s", i.spec.System.String())
-		return elementalError.NewFromError(err, elementalError.DumpSource)
-	}
 
 	// Fine tune the dumped tree
 	i.cfg.Logger.Info("Fine tune the dumped root tree")

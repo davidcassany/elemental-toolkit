@@ -29,7 +29,7 @@ import (
 
 	"github.com/rancher/elemental-toolkit/v2/pkg/constants"
 	"github.com/rancher/elemental-toolkit/v2/pkg/elemental"
-
+	elementalError "github.com/rancher/elemental-toolkit/v2/pkg/error"
 	"github.com/rancher/elemental-toolkit/v2/pkg/types"
 	"github.com/rancher/elemental-toolkit/v2/pkg/utils"
 )
@@ -126,7 +126,7 @@ func (l *LoopDevice) InitSnapshotter(state *types.Partition, efiDir string) erro
 }
 
 // StartTransaction starts a transaction for this snapshotter instance and returns the work in progress snapshot object.
-func (l *LoopDevice) StartTransaction() (*types.Snapshot, error) {
+func (l *LoopDevice) StartTransaction(src *types.ImageSource) (*types.Snapshot, error) {
 	l.cfg.Logger.Infof("Starting a snapshotter transaction")
 	nextID, err := l.getNextSnapshotID()
 	if err != nil {
@@ -183,6 +183,12 @@ func (l *LoopDevice) StartTransaction() (*types.Snapshot, error) {
 		MountPoint: constants.WorkingImgDir,
 		Label:      fmt.Sprintf(loopDeviceLabelPattern, nextID),
 		InProgress: true,
+	}
+
+	err = elemental.MirrorRoot(l.cfg, snapshot.WorkDir, src)
+	if err != nil {
+		l.cfg.Logger.Errorf("failed deploying source: %s", src.String())
+		return nil, elementalError.NewFromError(err, elementalError.DumpSource)
 	}
 
 	l.cfg.Logger.Infof("Transaction for snapshot %d successfully started", nextID)
