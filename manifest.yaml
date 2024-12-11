@@ -1,0 +1,6 @@
+disk:
+  expandable: true
+  start-sector: 32768
+  partitions:
+    bootloader:
+      size: 512

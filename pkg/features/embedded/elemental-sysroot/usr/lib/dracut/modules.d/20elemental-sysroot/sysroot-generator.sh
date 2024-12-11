@@ -95,6 +95,47 @@ if [ "${snapshotter}" == "btrfs" ]; then
         "$GENERATOR_DIR/initrd-root-fs.target.wants/${snapshots_unit}"
     ln -s "$GENERATOR_DIR/${rootvol_unit}" \
         "$GENERATOR_DIR/initrd-root-fs.target.wants/${rootvol_unit}"
+elif [ "${snapshotter}" == "containerd" ]; then
+    state_unit=$(systemd-escape -p --suffix=mount ${root_part_mnt})
+    case "${elemental_mode}" in
+        *active*)
+            image="active" ;;
+        *passive*)
+            image="${elemental_img}" ;;
+        *)
+            exit 1 ;;
+    esac
+    
+    ln -s /dev/null "$GENERATOR_DIR/sysroot.mount"
+    
+    {
+        echo "[Unit]"
+        echo "Before=initrd-root-fs.target"
+        echo "DefaultDependencies=no"
+        echo "After=initrd-root-device.target"
+        echo "Wants=initrd-root-device.target"
+        echo "[Mount]"
+        echo "Where=${root_part_mnt}"
+        echo "What=${root}"
+        echo "Options=defaults"
+    } > "$GENERATOR_DIR/${state_unit}"
+    
+    {
+        echo "[Unit]"
+        echo "Before=initrd-root-fs.target"
+        echo "DefaultDependencies=no"
+        echo "After=initrd-root-device.target"
+        echo "Wants=initrd-root-device.target"
+        echo "RequiresMountsFor=${root_part_mnt}"
+        echo "[Service]"
+        echo "Type=oneshot"
+        echo "RemainAfterExit=yes"
+        echo "ExecStart=/usr/bin/elemental sysroot-mount ${image}"
+    } > "$GENERATOR_DIR/sysroot.service"
+
+    mkdir -p "$GENERATOR_DIR"/initrd-root-fs.target.wants
+    ln -s "$GENERATOR_DIR/sysroot.service" \
+        "$GENERATOR_DIR/initrd-root-fs.target.wants/sysroot.service"
 else
     state_unit=$(systemd-escape -p --suffix=mount ${root_part_mnt})
     case "${elemental_mode}" in

@@ -186,8 +186,10 @@ const (
 	// Snapshotters
 	LoopDeviceMaxSnaps        = 2
 	BtrfsMaxSnaps             = 4
+	ContainerdMaxSnaps        = BtrfsMaxSnaps
 	LoopDeviceSnapshotterType = "loopdevice"
 	BtrfsSnapshotterType      = "btrfs"
+	ContainerdSnapshotterType = "containerd"
 	ActiveSnapshot            = "active"
 
 	// Legacy paths

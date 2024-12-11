@@ -37,7 +37,7 @@ import (
 	"github.com/rancher/elemental-toolkit/v2/pkg/types"
 )
 
-// BootedFrom will check if we are booting from the given label
+// BootedFrom will check if we are booting from the given image
 func BootedFrom(runner types.Runner, label string) bool {
 	out, _ := runner.Run("cat", "/proc/cmdline")
 	return strings.Contains(string(out), label)

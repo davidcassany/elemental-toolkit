@@ -1,5 +1,3 @@
 snapshotter:
-  type: btrfs
+  type: containerd
   max-snaps: 4
-  config:
-    snapper: true

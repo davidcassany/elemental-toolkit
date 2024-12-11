@@ -38,4 +38,5 @@ func NewSnapshotter(cfg types.Config, snapCfg types.SnapshotterConfig, bootloade
 func init() {
 	snapshotterFactories[constants.LoopDeviceSnapshotterType] = newLoopDeviceSnapshotter
 	snapshotterFactories[constants.BtrfsSnapshotterType] = newBtrfsSnapshotter
+	snapshotterFactories[constants.ContainerdSnapshotterType] = newContainerdSnapshotter
 }

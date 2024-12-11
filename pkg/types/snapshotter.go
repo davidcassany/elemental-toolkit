@@ -59,6 +59,8 @@ type BtrfsConfig struct {
 	Snapper bool `yaml:"snapper,omitempty" mapstructure:"snapper"`
 }
 
+type ContainerdConfig struct{}
+
 func NewLoopDeviceConfig() *LoopDeviceConfig {
 	return &LoopDeviceConfig{
 		FS:   constants.LinuxImgFs,
@@ -70,6 +72,10 @@ func NewBtrfsConfig() *BtrfsConfig {
 	return &BtrfsConfig{
 		Snapper: true, // By default use snapper
 	}
+}
+
+func NewContainerdConfig() *ContainerdConfig {
+	return &ContainerdConfig{}
 }
 
 func NewLoopDevice() SnapshotterConfig {
@@ -85,6 +91,14 @@ func NewBtrfs() SnapshotterConfig {
 		Type:     constants.BtrfsSnapshotterType,
 		MaxSnaps: constants.BtrfsMaxSnaps,
 		Config:   NewBtrfsConfig(),
+	}
+}
+
+func NewContainerd() SnapshotterConfig {
+	return SnapshotterConfig{
+		Type:     constants.ContainerdSnapshotterType,
+		MaxSnaps: constants.ContainerdMaxSnaps,
+		Config:   NewContainerdConfig(),
 	}
 }
 
@@ -112,6 +126,17 @@ func newBtrfsConfig(defConfig interface{}, data interface{}) (interface{}, error
 		return cfg, nil
 	}
 	return innerConfigDecoder[*BtrfsConfig](cfg, data)
+}
+
+func newContainerdConfig(defConfig interface{}, data interface{}) (interface{}, error) {
+	cfg, ok := defConfig.(*ContainerdConfig)
+	if !ok {
+		cfg = NewContainerdConfig()
+	}
+	if data == nil {
+		return cfg, nil
+	}
+	return innerConfigDecoder[*ContainerdConfig](cfg, data)
 }
 
 func innerConfigDecoder[T any](defaultConf T, data interface{}) (T, error) {
@@ -164,6 +189,10 @@ func (c *SnapshotterConfig) CustomUnmarshal(data interface{}) (bool, error) {
 			// constants.LoopDeviceMaxSnaps is already the default if nothing is provided
 			// switch to btrfs default in case btrfs is requested and no max-snaps is provided
 			c.MaxSnaps = constants.BtrfsMaxSnaps
+		} else if c.Type == constants.ContainerdSnapshotterType {
+			// constants.LoopDeviceMaxSnaps is already the default if nothing is provided
+			// switch to containerd default in case containerd is requested and no max-snaps is provided
+			c.MaxSnaps = constants.ContainerdMaxSnaps
 		}
 
 		factory := snapshotterConfFactories[c.Type]
@@ -201,4 +230,5 @@ func (c *SnapshotterConfig) UnmarshalYAML(node *yaml.Node) error {
 func init() {
 	snapshotterConfFactories[constants.LoopDeviceSnapshotterType] = newLoopDeviceConfig
 	snapshotterConfFactories[constants.BtrfsSnapshotterType] = newBtrfsConfig
+	snapshotterConfFactories[constants.ContainerdSnapshotterType] = newContainerdConfig
 }
