@@ -53,11 +53,11 @@ RUN ARCH=$(uname -m); \
       iproute2 \
       podman \
       audit \
-      patterns-microos-selinux \
       btrfsprogs \
       btrfsmaintenance \
       snapper \
       xterm-resize \
+      transactional-update \
       ${ADD_PKGS} && \
     zypper clean --all
 
@@ -80,6 +80,9 @@ RUN echo "PermitRootLogin yes" > /etc/ssh/sshd_config.d/rootlogin.conf
 # Add default snapshotter setup
 ADD snapshotter.yaml /etc/elemental/config.d/snapshotter.yaml
 
+# Add install/upgrade hooks
+ADD hooks.yaml /system/oem/hooks.yaml
+
 # Add specific Grub bootargs for RISC-V
 ADD riscv_bootargs.cfg /tmp/riscv_bootargs.cfg
 RUN ARCH=$(uname -m); \
@@ -94,6 +97,9 @@ RUN ARCH=$(uname -m); \
       [[ "${ARCH}" == "aarch64" ]] && FEATURES+=" arm-firmware grub-default-bootargs"; \
     fi; \
     elemental --debug init --force ${FEATURES}
+
+# Overwrite mount setup
+ADD mount.yaml /system/oem/00_layout.yaml
 
 # Update os-release file with some metadata
 RUN echo IMAGE_REPO=\"${REPO}\"             >> /etc/os-release && \

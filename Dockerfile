@@ -58,7 +58,6 @@ RUN ARCH=$(uname -m); \
         xorriso \
         cosign \
         gptfdisk \
-        patterns-microos-selinux \
         btrfsprogs \
 	snapper \
         lvm2 && \

@@ -311,7 +311,7 @@ func WriteFstab(cfg *types.RunConfig, spec *types.MountSpec, data string) error 
 
 		for _, path := range spec.Persistent.Paths {
 			if spec.Persistent.Mode == constants.OverlayMode {
-				data += overlayLine(path, filepath.Join(pVol.Mountpoint, constants.PersistentStateDir), constants.PersistentDir)
+				data += overlayLine(path, filepath.Join(pVol.Mountpoint, constants.PersistentStateDir), spec.Persistent.Volume.Mountpoint)
 				continue
 			}
 

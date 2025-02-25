@@ -1,0 +1,5 @@
+name: "Preload /var on install"
+stages:
+   after-install-chroot:
+     - commands:
+       - rsync --progress --partial --human-readable --archive --xattrs --acls --filter='-x security.selinux' /var/ /run/elemental/persistent/

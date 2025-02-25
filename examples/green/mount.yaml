@@ -1,0 +1,25 @@
+name: "Rootfs Layout Settings"
+stages:
+  rootfs:
+  - if: '[ ! -f "/run/elemental/recovery_mode" ]'
+    name: "Layout configuration for recovery"
+    files:
+    - path: /run/elemental/config.d/layout.yaml
+      content: |
+        mount:
+          write-fstab: true
+          ephemeral:
+            type: tmpfs
+            size: 25%
+            paths: ['/srv']
+          persistent:
+            volume:
+              device: 'PARTLABEL=persistent'
+              mountpoint: '/var'
+            mode: bind
+            paths:
+            - /etc
+            - /home
+            - /opt
+            - /root
+            - /usr/local
