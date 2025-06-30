@@ -1,4 +1,6 @@
 install:
+  cloud-init:
+    - "/root/chroot_hooks.yaml"
   partitions:
     state:
       size: 6144

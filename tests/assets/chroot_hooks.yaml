@@ -6,3 +6,14 @@ stages:
    after-reset-chroot:
      - commands:
         - echo > /after-reset-chroot
+   after-install-chroot:
+     - commands:
+        - echo > /after-install-chroot
+     - files:
+       - content: |
+           name: After install hook
+           stages:
+             after-install:
+               - commands:
+                 - echo > /run/elemental/workingtree/after-install
+         path: /system/oem/after-install-hook.yaml

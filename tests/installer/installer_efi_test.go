@@ -34,9 +34,9 @@ var _ = Describe("Elemental Installer EFI tests", func() {
 		Context("partition layout tests", func() {
 			Context("with partition layout", func() {
 				It("performs a standard install", func() {
-					err := s.SendFile("../assets/custom_partitions.yaml", "/etc/elemental/config.d/custom_partitions.yaml", "0770")
-					By("Running the elemental install with a layout file")
-					Expect(err).To(BeNil())
+					Expect(s.SendFile("../assets/custom_install.yaml", "/etc/elemental/config.d/custom_install.yaml", "0770")).To(Succeed())
+					Expect(s.SendFile("../assets/chroot_hooks.yaml", "/root/chroot_hooks.yaml", "0770")).To(Succeed())
+					By("Running the elemental install with a layout file and custom cloud-config files including after-install hooks")
 					out, err := s.Command(s.ElementalCmd("install", "--squash-no-compression", "/dev/vda"))
 					Expect(err).To(BeNil())
 					Expect(out).To(ContainSubstring("Mounting disk partitions"))
@@ -77,6 +77,14 @@ var _ = Describe("Elemental Installer EFI tests", func() {
 					}
 					By("check state file includes expected actions for the first snapshot and recovery image")
 					stateStr, err := s.Command(s.ElementalCmd("state"))
+					Expect(err).NotTo(HaveOccurred())
+
+					By("after-install-chroot hooks was exectued")
+					_, err = s.Command("cat /after-install-chroot")
+					Expect(err).NotTo(HaveOccurred())
+
+					By("after-install hooks was exectued")
+					_, err = s.Command("cat /after-install")
 					Expect(err).NotTo(HaveOccurred())
 
 					state := map[string]interface{}{}
