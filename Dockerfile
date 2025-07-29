@@ -6,8 +6,6 @@ FROM golang:${GO_VERSION}-alpine as elemental-bin
 ENV CGO_ENABLED=0
 WORKDIR /src/
 
-# needed for `go mod download`
-RUN apk add git
 # Add specific dirs to the image so cache is not invalidated when modifying non go files
 ADD go.mod .
 ADD go.sum .
@@ -23,6 +21,7 @@ ARG ELEMENTAL_COMMIT=""
 ENV ELEMENTAL_VERSION=${ELEMENTAL_VERSION}
 ENV ELEMENTAL_COMMIT=${ELEMENTAL_COMMIT}
 RUN go build \
+    -mod vendor \
     -ldflags "-w -s \
     -X github.com/rancher/elemental-toolkit/internal/version.version=$ELEMENTAL_VERSION \
     -X github.com/rancher/elemental-toolkit/internal/version.gitCommit=$ELEMENTAL_COMMIT" \
