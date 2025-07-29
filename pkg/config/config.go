@@ -1,5 +1,5 @@
 /*
-Copyright © 2022 - 2024 SUSE LLC
+Copyright © 2022 - 2025 SUSE LLC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -592,4 +592,53 @@ func NewBuildConfig(opts ...GenericOptions) *v1.BuildConfig {
 		Name:   constants.BuildImgName,
 	}
 	return b
+}
+
+// ReconcileUpgradeSpec will check current mounts which may differ from elemental disovery from /sys/block tree
+// as this skips multipathed devices which may be in use.
+func ReconcileUpgradeSpec(r *v1.RunConfig, spec *v1.UpgradeSpec) error {
+	if spec.Partitions.State != nil {
+		if err := reconcilePartition(r, spec.Partitions.State); err != nil {
+			return err
+		}
+	}
+	if spec.Partitions.Recovery != nil {
+		if err := reconcilePartition(r, spec.Partitions.Recovery); err != nil {
+			return err
+		}
+	}
+
+	if spec.Partitions.Persistent != nil {
+		if err := reconcilePartition(r, spec.Partitions.Persistent); err != nil {
+			return err
+		}
+	}
+
+	if spec.Partitions.OEM != nil {
+		if err := reconcilePartition(r, spec.Partitions.OEM); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func reconcilePartition(r *v1.RunConfig, part *v1.Partition) error {
+	discoveredMountDiskBytes, err := execBlkid(r, part.FilesystemLabel)
+	if err != nil {
+		return fmt.Errorf("error discovering current partition using label %s: %w", part.FilesystemLabel, err)
+	}
+
+	// trim space since `blkid` output has a newline in result
+	discoveredMount := strings.TrimSpace(string(discoveredMountDiskBytes))
+	if part.Path != discoveredMount {
+		part.Path = discoveredMount
+	}
+	return nil
+}
+func execBlkid(r *v1.RunConfig, name string) ([]byte, error) {
+	if ok := r.Config.Runner.CommandExists("blkid"); ok {
+		return r.Config.Runner.Run("blkid", "-L", name)
+	}
+
+	return []byte{}, fmt.Errorf("blkid not found")
 }

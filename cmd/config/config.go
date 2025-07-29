@@ -1,5 +1,5 @@
 /*
-Copyright © 2022 - 2024 SUSE LLC
+Copyright © 2022 - 2025 SUSE LLC
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ import (
 	"k8s.io/mount-utils"
 
 	"github.com/rancher/elemental-toolkit/internal/version"
+
 	"github.com/rancher/elemental-toolkit/pkg/config"
 	"github.com/rancher/elemental-toolkit/pkg/constants"
 	v1 "github.com/rancher/elemental-toolkit/pkg/types/v1"
@@ -295,6 +296,11 @@ func ReadUpgradeSpec(r *v1.RunConfig, flags *pflag.FlagSet) (*v1.UpgradeSpec, er
 		r.Logger.Warnf("error unmarshalling UpgradeSpec: %s", err)
 	}
 	err = upgrade.Sanitize()
+	if err != nil {
+		return nil, fmt.Errorf("failed sanitizing upgrade spec: %v", err)
+	}
+
+	err = config.ReconcileUpgradeSpec(r, upgrade)
 	r.Logger.Debugf("Loaded upgrade UpgradeSpec: %s", litter.Sdump(upgrade))
 	return upgrade, err
 }

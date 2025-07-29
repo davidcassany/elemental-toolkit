@@ -10,7 +10,6 @@ WORKDIR /src/
 ADD go.mod .
 ADD go.sum .
 ADD vendor vendor
-RUN go mod download
 ADD cmd cmd
 ADD internal internal
 ADD pkg pkg
@@ -22,6 +21,7 @@ ARG ELEMENTAL_COMMIT=""
 ENV ELEMENTAL_VERSION=${ELEMENTAL_VERSION}
 ENV ELEMENTAL_COMMIT=${ELEMENTAL_COMMIT}
 RUN go build \
+    -mod vendor \
     -ldflags "-w -s \
     -X github.com/rancher/elemental-toolkit/internal/version.version=$ELEMENTAL_VERSION \
     -X github.com/rancher/elemental-toolkit/internal/version.gitCommit=$ELEMENTAL_COMMIT" \
