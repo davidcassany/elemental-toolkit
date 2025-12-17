@@ -1,8 +1,6 @@
 package cos_test
 
 import (
-	"fmt"
-
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 
@@ -38,7 +36,6 @@ var _ = Describe("Elemental Installer EFI tests", func() {
 					By("Running the elemental install with a layout file")
 					Expect(err).To(BeNil())
 					out, err := s.Command(s.ElementalCmd("install", "--squash-no-compression", "/dev/vda"))
-					fmt.Printf(out)
 					Expect(err).To(BeNil())
 					Expect(out).To(ContainSubstring("Mounting disk partitions"))
 					Expect(out).To(ContainSubstring("Partitioning device..."))
