@@ -41,7 +41,7 @@ func grubCfgTemplate(arch string) string {
 
 	menuentry "%s" --class os --unrestricted {
 		echo Loading kernel...
-		linux ($root)` + constants.ISOKernelPath(arch) + ` cdroot root=live:CDLABEL=%s rd.live.dir=` + constants.ISOLoaderPath(arch) + `  rd.live.squashimg=rootfs.squashfs console=tty1 console=ttyS0 elemental.disable elemental.setup=` + constants.ISOCloudInitPath + `
+		linux ($root)` + constants.ISOKernelPath(arch) + ` cdroot root=live:CDLABEL=%s rd.live.dir=` + constants.ISOLoaderPath(arch) + `  rd.live.squashimg=rootfs.squashfs selinux=0 console=tty1 console=ttyS0 elemental.disable elemental.setup=` + constants.ISOCloudInitPath + `
 		echo Loading initrd...
 		initrd ($root)` + constants.ISOInitrdPath(arch) + `
 	}
