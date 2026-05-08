@@ -4,7 +4,7 @@ ARG VERSION=latest
 FROM ${TOOLKIT_REPO}:${VERSION} AS toolkit
 
 # OS base image of our choice
-FROM ubuntu:24.04 AS os
+FROM ubuntu:26.04 AS os
 ARG REPO
 ARG VERSION
 ENV VERSION=${VERSION}
@@ -16,7 +16,6 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
   dracut-core \
   dracut-network \
   dracut-live \
-  dracut-squash \
   grub2-common \
   grub-efi-amd64 \
   shim \
@@ -57,7 +56,7 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
 
 # Hack to prevent systemd-firstboot failures while setting keymap, this is known
 # Debian issue (T_T) https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=790955
-RUN DEBIAN_FRONTEND=noninteractive apt install -y console-data || true && \
+RUN DEBIAN_FRONTEND=noninteractive apt install -y console-data && \
     apt-get clean && rm -rf /var/lib/apt/lists/* && \
     cd /usr/share/keymaps/i386/qwerty && \
       find . -name '*.kmap.gz' -exec sh -c 'ln -s "$0" "${0%.kmap.gz}.map.gz"' {} \;
@@ -70,9 +69,6 @@ COPY --from=toolkit /usr/bin/elemental /usr/bin/elemental
 
 # Enable essential services
 RUN systemctl enable systemd-networkd.service
-
-# Enable /tmp to be on tmpfs
-RUN cp /usr/share/systemd/tmp.mount /etc/systemd/system
 
 # Generate en_US.UTF-8 locale, this the locale set at boot by
 # the default cloud-init
